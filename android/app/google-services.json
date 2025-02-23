@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "19691945197",
+    "project_id": "qringer-b54dd",
+    "storage_bucket": "qringer-b54dd.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:19691945197:android:c9536ccf9519c95acd60e4",
+        "android_client_info": {
+          "package_name": "com.example.qringer_mobile_stream_io"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB00nYCaQR_2fzKyRCn-ncs9wRtkTZ0m3w"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
