@@ -2,6 +2,7 @@ import 'dart:developer' as developer;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'utils/auth_utils.dart';
 
 class RegisterView extends StatefulWidget {
   const RegisterView({super.key});
@@ -10,26 +11,32 @@ class RegisterView extends StatefulWidget {
 }
 
 class _RegisterViewState extends State<RegisterView> {
-  final _phoneNumberController = TextEditingController();
+  final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
+
   bool _isObscurePassword = true;
   bool _isObscureConfirmPassword = true;
+
   late bool _showPasswordValidationError;
   late bool _showConfirmPasswordValidationError;
+  late bool _showEmailValidationError;
 
   final _formKey = GlobalKey<FormState>();
   final fieldPasswordKey = GlobalKey<FormFieldState>();
   final fieldConfirmPasswordKey = GlobalKey<FormFieldState>();
+  final fieldEmailKey = GlobalKey<FormFieldState>();
 
   late FocusNode _passwordFocusNode;
   late FocusNode _confirmPasswordFocusNode;
+  late FocusNode _emailFocusNode;
 
   @override
   void initState() {
     super.initState();
     _passwordFocusNode = FocusNode();
     _confirmPasswordFocusNode = FocusNode();
+    _emailFocusNode = FocusNode();
 
     _passwordFocusNode.addListener(() {
       if (!_passwordFocusNode.hasFocus) {
@@ -62,15 +69,69 @@ class _RegisterViewState extends State<RegisterView> {
         }
       }
     });
+
+    _emailFocusNode.addListener(() {
+      if (!_emailFocusNode.hasFocus) {
+        setState(() {
+          _showEmailValidationError = false;
+          fieldEmailKey.currentState!.validate();
+        });
+      } else {
+        if (!_showEmailValidationError) {
+          setState(() {
+            _showEmailValidationError = true;
+            fieldEmailKey.currentState!.validate();
+          });
+        }
+      }
+    });
+  }
+
+  void signUp(String email, String password) async {
+    try {
+      // Create user with email and password
+      UserCredential userCredential =
+          await FirebaseAuth.instance.createUserWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+      if (!mounted) return;
+      // Show success message
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Registration successful!')),
+      );
+
+      // Optionally, navigate to another screen after successful registration
+      // Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => HomeScreen()));
+    } on FirebaseAuthException catch (e) {
+      // Handle errors
+      if (!mounted) return;
+      if (e.code == 'email-already-in-use') {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Email already in use')),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Registration failed: ${e.message}')),
+        );
+      }
+    } catch (e) {
+      // Handle other errors
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('An error occurred: $e')),
+      );
+    }
   }
 
   @override
   void dispose() {
-    _phoneNumberController.dispose();
+    _emailController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
     _passwordFocusNode.dispose();
     _confirmPasswordFocusNode.dispose();
+    _emailFocusNode.dispose();
     super.dispose();
   }
 
@@ -107,21 +168,37 @@ class _RegisterViewState extends State<RegisterView> {
                         style: TextStyle(color: Colors.white, fontSize: 20.0)),
                     const SizedBox(height: 30),
                     TextFormField(
-                      controller: _phoneNumberController,
+                      controller: _emailController,
+                      focusNode: _emailFocusNode,
+                      key: fieldEmailKey,
                       decoration: InputDecoration(
-                          hintText: 'Phone number',
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8.0),
-                          ),
-                          filled: true,
-                          fillColor: Colors.white,
-                          contentPadding:
-                              const EdgeInsets.fromLTRB(15.0, 0, 0, 0)),
-                      keyboardType: TextInputType.phone,
-                      inputFormatters: [
-                        FilteringTextInputFormatter.digitsOnly,
-                        LengthLimitingTextInputFormatter(10),
-                      ],
+                        hintText: 'Email',
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8.0),
+                        ),
+                        filled: true,
+                        fillColor: Colors.white,
+                        contentPadding:
+                            const EdgeInsets.fromLTRB(15.0, 0, 0, 0),
+                      ),
+                      keyboardType: TextInputType.emailAddress,
+                      onChanged: (value) {
+                        _emailController.text = value;
+                        _showEmailValidationError = true;
+                        fieldEmailKey.currentState!.validate();
+                      }, // Use email keyboard type
+                      validator: (value) {
+                        if (!_showEmailValidationError) return null;
+
+                        if (value == null || value.isEmpty) {
+                          return 'Please enter your email';
+                        }
+                        if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$')
+                            .hasMatch(value)) {
+                          return 'Please enter a valid email address';
+                        }
+                        return null;
+                      },
                       onTapOutside: (_) {
                         FocusScope.of(context).unfocus();
                       },
@@ -239,64 +316,21 @@ class _RegisterViewState extends State<RegisterView> {
                     ),
                     ElevatedButton(
                         style: buttonStyle,
-
-                        onPressed: () {
+                        onPressed: () async {
                           setState(() {
                             _showPasswordValidationError = true;
                             _showConfirmPasswordValidationError = true;
                           });
 
-                          if (fieldPasswordKey.currentState!.validate() &&
+                          if (fieldEmailKey.currentState!.validate() &&
+                              fieldPasswordKey.currentState!.validate() &&
                               fieldConfirmPasswordKey.currentState!
-                                  .validate() &&
-                              _phoneNumberController.text.isNotEmpty) {
-                            var password =
-                                fieldPasswordKey.currentState!.value.toString();
-                            var confirmPassword = fieldConfirmPasswordKey
-                                .currentState!.value
-                                .toString();
-                            var phoneNumber =
-                                _phoneNumberController.text.toString();
-
-                            FirebaseAuth.instance.verifyPhoneNumber(
-                              phoneNumber: "+1$phoneNumber",
-                              verificationCompleted:
-                                  (PhoneAuthCredential credential) async {
-                                ScaffoldMessenger.of(context).hideCurrentSnackBar();
-                                await FirebaseAuth.instance
-                                    .signInWithCredential(credential);
-                              },
-                              verificationFailed: (FirebaseAuthException e) {
-                                ScaffoldMessenger.of(context).hideCurrentSnackBar();
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text("Verification failed: ${e.message}"),
-                                  ),
-                                );
-                              },
-                              codeSent: (String verificationId, int? resendToken) {
-                                ScaffoldMessenger.of(context).hideCurrentSnackBar();
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text("Verification code sent"),
-                                  ),
-                                );
-                              },
-                              codeAutoRetrievalTimeout: (String verificationId) {
-                                ScaffoldMessenger.of(context).hideCurrentSnackBar();
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text("Verification timed out"),
-                                  ),
-                                );
-                              },
-                            );
-
-                            
-
-                            
+                                  .validate()) {
+                            // await AuthUtils.signUp(_emailController.text.trim(),
+                            //     _passwordController.text.trim(), context);
+                          } else {
                             ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Registering...')),
+                              const SnackBar(content: Text('Please fill all the fields correctly')),
                             );
                           }
                         },

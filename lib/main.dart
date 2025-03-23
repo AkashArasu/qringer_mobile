@@ -129,22 +129,54 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:qringer_mobile_stream_io/register_view.dart';
-import 'package:stream_video_flutter/stream_video_flutter.dart';
+import 'package:qringer_mobile_stream_io/home_view.dart';
+import 'package:qringer_mobile_stream_io/utils/app_init.dart';
+import 'package:qringer_mobile_stream_io/utils/app_keys.dart';
+import 'package:qringer_mobile_stream_io/verify_view.dart';
+import 'package:stream_video_flutter/stream_video_flutter.dart' as streamvf;
 import 'package:stream_video_push_notification/stream_video_push_notification.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
-import 'package:flutter_ringtone_player/flutter_ringtone_player.dart';
+// import 'package:flutter_ringtone_player/flutter_ringtone_player.dart';
 import 'package:rxdart/rxdart.dart';
 import 'package:qringer_mobile_stream_io/login_view.dart';
-// import 'firebase_options.dart';
+import 'package:qringer_mobile_stream_io/utils/user.dart';
+import 'package:stream_video/stream_video.dart' as streamv;
 
-void main() async {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
-  runApp(const MyApp());
+  final storedUser = await AppInitializer.getStoredUser();
+
+  if (storedUser != null) {
+    await AppInitializer.init(storedUser);
+  }
+  runApp(MainApp(storedUser: storedUser));
+  // runApp(const MyApp());
+}
+
+class MainApp extends StatefulWidget {
+  final User? storedUser;
+
+  const MainApp({
+    this.storedUser,
+    super.key,
+  });
+
+  @override
+  State<MainApp> createState() => _MainAppState();
+}
+
+class _MainAppState extends State<MainApp> {
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      home: widget.storedUser == null ? const LoginView() : const HomeView(),
+    );
+  }
 }
 
 class MyApp extends StatelessWidget {
@@ -158,7 +190,7 @@ class MyApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.green),
         useMaterial3: true,
       ),
-      home: const RegisterView(),
+      home: const LoginView(),
     );
   }
 }
@@ -172,8 +204,8 @@ class CallReceiverPage extends StatefulWidget {
 
 class _CallReceiverPageState extends State<CallReceiverPage>
     with WidgetsBindingObserver {
-  late final StreamVideo _streamVideo;
-  Call? _call;
+  late final streamvf.StreamVideo _streamVideo;
+  streamvf.Call? _call;
   bool _isReceivingCall = false;
   String? _incomingCallId;
   // final FirebaseMessaging _firebaseMessaging = FirebaseMessaging.instance;
@@ -195,9 +227,9 @@ class _CallReceiverPageState extends State<CallReceiverPage>
   }
 
   void _initializeStreamVideo() {
-    _streamVideo = StreamVideo(
+    _streamVideo = streamvf.StreamVideo(
       'y8h5754fwgma',
-      user: User.regular(
+      user: streamvf.User.regular(
         userId: 'homeowner',
         name: 'Aashika',
         role: 'user',
@@ -206,7 +238,7 @@ class _CallReceiverPageState extends State<CallReceiverPage>
       userToken:
           'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoiaG9tZW93bmVyIn0.dCKk27c3QZiJsBZxnMW5PHpSxbwPD6QdjSTWBsNzIY0',
 
-      options: const StreamVideoOptions(
+      options: const streamvf.StreamVideoOptions(
         // It's important to keep connections alive when the app is in the background to properly handle incoming calls while the app is in the background
         keepConnectionsAliveWhenInBackground: true,
       ),
@@ -262,7 +294,7 @@ class _CallReceiverPageState extends State<CallReceiverPage>
       });
 
       // Play ringtone
-      FlutterRingtonePlayer.playRingtone();
+      // FlutterRingtonePlayer.playRingtone();
 
       // Show incoming call UI
       _showIncomingCallDialog(call!);
@@ -313,7 +345,7 @@ class _CallReceiverPageState extends State<CallReceiverPage>
   //   }
   // }
 
-  Future<void> _showIncomingCallDialog(Call call) async {
+  Future<void> _showIncomingCallDialog(streamvf.Call call) async {
     return showDialog(
       context: context,
       barrierDismissible: false,
@@ -340,8 +372,8 @@ class _CallReceiverPageState extends State<CallReceiverPage>
     );
   }
 
-  Future<void> _acceptCall(Call call) async {
-    FlutterRingtonePlayer.stop();
+  Future<void> _acceptCall(streamvf.Call call) async {
+    // FlutterRingtonePlayer.stop();
     setState(() {
       _call = call;
       _isReceivingCall = false;
@@ -353,13 +385,13 @@ class _CallReceiverPageState extends State<CallReceiverPage>
     // );
 
     await _call?.join(
-        connectOptions: CallConnectOptions(
-      camera: TrackOption.disabled(),
+        connectOptions: streamvf.CallConnectOptions(
+      camera: streamvf.TrackOption.disabled(),
     ));
   }
 
-  Future<void> _rejectCall(Call call) async {
-    FlutterRingtonePlayer.stop();
+  Future<void> _rejectCall(streamvf.Call call) async {
+    // FlutterRingtonePlayer.stop();
     await call.reject();
     setState(() {
       _isReceivingCall = false;
@@ -372,13 +404,13 @@ class _CallReceiverPageState extends State<CallReceiverPage>
     return Scaffold(
       appBar: AppBar(title: const Text('Call Receiver')),
       body: _call != null
-          ? StreamCallContainer(
+          ? streamvf.StreamCallContainer(
               call: _call!,
               callContentBuilder: (context, call, participants) {
-                return StreamCallContent(
+                return streamvf.StreamCallContent(
                   call: call,
                   callState: participants,
-                  layoutMode: ParticipantLayoutMode.spotlight,
+                  layoutMode: streamvf.ParticipantLayoutMode.spotlight,
                   callAppBarBuilder: (context, call, callState) {
                     return AppBar(
                       actions: const [],
@@ -386,18 +418,18 @@ class _CallReceiverPageState extends State<CallReceiverPage>
                   },
                   callControlsBuilder: (context, call, callState) {
                     final localParticipant = callState.localParticipant!;
-                    return StreamCallControls(options: [
-                      LeaveCallOption(
+                    return streamvf.StreamCallControls(options: [
+                      streamvf.LeaveCallOption(
                           call: call,
                           onLeaveCallTap: () async {
                             await call.leave();
                             setState(() => _call = null);
                           }),
-                      ToggleCameraOption(
+                      streamvf.ToggleCameraOption(
                           call: call, localParticipant: localParticipant),
-                      ToggleMicrophoneOption(
+                      streamvf.ToggleMicrophoneOption(
                           call: call, localParticipant: localParticipant),
-                      ToggleSpeakerphoneOption(call: call),
+                      streamvf.ToggleSpeakerphoneOption(call: call),
                     ]);
                   },
                 );
@@ -455,10 +487,4 @@ class _CallReceiverPageState extends State<CallReceiverPage>
     super.dispose();
     _compositeSubscription.cancel();
   }
-}
-
-// Handle background messages
-Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  await Firebase.initializeApp();
-  // Handle the background message
 }
