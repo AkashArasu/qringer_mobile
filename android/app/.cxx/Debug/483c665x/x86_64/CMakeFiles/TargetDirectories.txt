@@ -1,0 +1,2 @@
+D:/flutter_projects/qringer_mobile_stream_io/android/app/.cxx/Debug/483c665x/x86_64/CMakeFiles/edit_cache.dir
+D:/flutter_projects/qringer_mobile_stream_io/android/app/.cxx/Debug/483c665x/x86_64/CMakeFiles/rebuild_cache.dir
