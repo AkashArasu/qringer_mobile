@@ -33,7 +33,10 @@ Future<void> _setupFirebaseMessaging() async {
       announcement: false,
       badge: true,
       carPlay: false,
-      criticalAlert: true, // iOS: For critical notifications
+      // VoIP pushes/CallKit handle incoming calls on iOS. Requesting critical
+      // alerts without Apple's entitlement can make the permission request
+      // fail and is not needed for this flow.
+      criticalAlert: false,
       provisional: false,
       sound: true,
     );
@@ -43,9 +46,9 @@ Future<void> _setupFirebaseMessaging() async {
     if (settings.authorizationStatus == AuthorizationStatus.authorized) {
       debugPrint('✅ FCM permissions granted');
 
-      // Get FCM token for debugging
+      // Confirm token availability without writing credential material to logs.
       final token = await messaging.getToken();
-      debugPrint('🔥 FCM Token: ${token?.substring(0, 20)}...');
+      debugPrint('🔥 FCM token available: ${token?.isNotEmpty == true}');
 
       // Android-specific: Set foreground notification presentation options
       if (Platform.isAndroid) {
@@ -60,11 +63,9 @@ Future<void> _setupFirebaseMessaging() async {
             .ensureFullScreenIntentPermission();
       }
 
-      // Configure high-priority delivery for Android
-      if (Platform.isAndroid) {
-        debugPrint('📱 Configuring Android FCM high-priority delivery');
-        // Note: High-priority settings are handled in AndroidManifest.xml
-      }
+      // Push priority is selected by Stream's server payload, not the Android
+      // manifest. What the app can guarantee here is a valid device mapping.
+      await AppInitializer.ensurePushRegistration(maxAttempts: 3);
     } else {
       debugPrint('❌ FCM permissions denied: ${settings.authorizationStatus}');
     }
@@ -135,7 +136,10 @@ Future<void> main() async {
   Map<String, dynamic>? acceptedNativeCall;
 
   if (storedUser != null) {
-    await AppInitializer.init(storedUser);
+    // Construct the authenticated client immediately, but do not block the
+    // first frame on a WebSocket connection. Normal startup repairs it just
+    // after runApp; a notification Answer route connects explicitly below.
+    await AppInitializer.init(storedUser, connect: false);
     acceptedNativeCall = await _acceptedNativeCallForColdStart();
   }
 
@@ -149,6 +153,11 @@ Future<void> main() async {
     acceptedNativeCall: acceptedNativeCall,
   ));
 
+  if (storedUser != null) {
+    // Connection repair must not depend on the notification permission dialog
+    // or FCM token lookup succeeding.
+    unawaited(AppInitializer.ensurePushRegistration(maxAttempts: 3));
+  }
   unawaited(_setupFirebaseMessaging());
 }
 
@@ -268,6 +277,8 @@ class _ColdStartCallScreenState extends State<ColdStartCallScreen> {
     }
 
     try {
+      final ready = await AppInitializer.ensurePushRegistration(maxAttempts: 3);
+      if (!ready) throw StateError('Stream is not connected');
       final result = await streamvf.StreamVideo.instance.consumeIncomingCall(
         uuid: uuid,
         cid: callCid,

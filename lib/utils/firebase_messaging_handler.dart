@@ -1,6 +1,7 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:qringer_mobile_stream_io/firebase_options.dart';
 import 'package:qringer_mobile_stream_io/utils/app_init.dart';
@@ -67,10 +68,37 @@ class BackgroundStreamVideoManager {
   }
 }
 
+String? callCidFromNativeCall(dynamic rawCall) {
+  if (rawCall is! Map) return null;
+  final call = Map<String, dynamic>.from(rawCall);
+  final extra = call['extra'];
+  if (extra is! Map) return null;
+  return Map<String, dynamic>.from(extra)['callCid'] as String?;
+}
+
+Future<bool> hasNativeCallForCid(String? callCid) async {
+  if (callCid == null || callCid.isEmpty) return false;
+  try {
+    final calls = await FlutterCallkitIncoming.activeCalls();
+    return calls.any((call) => callCidFromNativeCall(call) == callCid);
+  } catch (error) {
+    debugPrint('Unable to inspect native incoming calls: $error');
+    return false;
+  }
+}
+
+Future<bool> waitForNativeCall(String? callCid) async {
+  for (var attempt = 0; attempt < 12; attempt++) {
+    if (await hasNativeCallForCid(callCid)) return true;
+    await Future<void>.delayed(const Duration(milliseconds: 75));
+  }
+  return false;
+}
+
 /// Firebase invokes this entry point in a background isolate. That isolate has
-/// no foreground StreamVideo singleton, so it must initialize Firebase, restore
-/// the homeowner, create an authenticated Stream client, and let Stream's push
-/// manager present the native incoming-call UI.
+/// no foreground StreamVideo singleton. It restores an authenticated client
+/// without opening the coordinator WebSocket; the SDK only needs its HTTP call
+/// lookup to validate the ring and present the native incoming-call UI.
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   try {
@@ -87,7 +115,17 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
       return;
     }
 
-    debugPrint('Handling Stream background ringing message ${message.messageId}: ${payload['call_cid']}');
+    final callCid = payload['call_cid'] as String?;
+    debugPrint(
+        'Handling Stream background ringing message ${message.messageId}: $callCid');
+
+    // FCM may redeliver the same high-priority data message. The pinned Stream
+    // SDK generates a new native UUID for each delivery, so deduplicate by CID
+    // before asking it to show another incoming-call card.
+    if (await hasNativeCallForCid(callCid)) {
+      debugPrint('Ignoring duplicate incoming-call delivery for $callCid');
+      return;
+    }
 
     final storedUser = await AppInitializer.getStoredUser();
     if (storedUser == null) {
@@ -97,19 +135,16 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 
     final client = streamvf.StreamVideo.isInitialized()
         ? streamvf.StreamVideo.instance
-        : await AppInitializer.init(storedUser);
+        : await AppInitializer.init(storedUser, connect: false);
 
     final handled = await client.handleRingingFlowNotifications(payload);
-    if (handled) {
-      // The Stream helper starts the platform incoming-call presentation
-      // asynchronously. Keep Firebase's background isolate alive long enough
-      // for that platform call to reach Android before the handler returns.
-      await Future<void>.delayed(const Duration(milliseconds: 350));
-    }
+    final presented = handled && await waitForNativeCall(callCid);
     debugPrint(
-      handled
+      presented
           ? 'Background incoming-call notification presented'
-          : 'Stream did not handle background message ${message.messageId}',
+          : handled
+              ? 'Stream handled the ring but native presentation was not confirmed'
+              : 'Stream did not handle background message ${message.messageId}',
     );
   } catch (error, stackTrace) {
     debugPrint('Background incoming-call handling failed: $error');

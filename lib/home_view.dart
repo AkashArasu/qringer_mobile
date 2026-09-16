@@ -63,7 +63,7 @@ class HomeView extends StatefulWidget {
   State<HomeView> createState() => _HomeViewState();
 }
 
-class _HomeViewState extends State<HomeView> {
+class _HomeViewState extends State<HomeView> with WidgetsBindingObserver {
   final streamvf.Subscriptions subscriptions = streamvf.Subscriptions();
   bool videoCall = true;
   bool _isLoading = false;
@@ -79,11 +79,22 @@ class _HomeViewState extends State<HomeView> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     videoCall = widget.initialVideoCall ?? true;
     // Attach before any await. Android may deliver the Answer action as soon
     // as Flutter attaches to a process launched from a notification.
     _observeCallKitEvents();
     _initializeApp();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // Repair a connection or device mapping that may have failed while the
+      // phone was offline. This is idempotent and never changes call state.
+      unawaited(AppInitializer.ensurePushRegistration());
+      unawaited(_recoverAcceptedNativeCall());
+    }
   }
 
   Future<void> _initializeApp() async {
@@ -124,14 +135,24 @@ class _HomeViewState extends State<HomeView> {
       debugPrint('🔥 Message data: ${message.data}');
       debugPrint('🔥 Message from: ${message.from ?? "unknown"}');
 
+      if (message.data['sender'] != 'stream.video') return false;
+      final callCid = message.data['call_cid'] as String?;
+      if (await hasNativeCallForCid(callCid)) {
+        debugPrint('Ignoring duplicate foreground ring for $callCid');
+        return true;
+      }
+
+      await AppInitializer.ensurePushRegistration(maxAttempts: 2);
       final startTime = DateTime.now();
       final result = await streamvf.StreamVideo.instance
           .handleRingingFlowNotifications(message.data)
           .timeout(const Duration(seconds: 8)); // Reduced from 15s to 8s
 
+      final presented = result && await waitForNativeCall(callCid);
+
       final duration = DateTime.now().difference(startTime);
       debugPrint(
-          '✅ Foreground FCM message handled: $result in ${duration.inSeconds}s');
+          '✅ Foreground FCM message handled: $result, nativePresented=$presented in ${duration.inSeconds}s');
 
       if (!result) {
         debugPrint('⚠️ Foreground message handling failed');
@@ -456,6 +477,7 @@ class _HomeViewState extends State<HomeView> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     subscriptions.cancelAll();
     super.dispose();
   }
