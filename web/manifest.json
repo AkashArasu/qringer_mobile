@@ -1,6 +1,6 @@
 {
-    "name": "qringer_mobile_stream_io",
-    "short_name": "qringer_mobile_stream_io",
+    "name": "QROnly",
+    "short_name": "QROnly",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

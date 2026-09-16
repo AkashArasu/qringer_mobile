@@ -5,6 +5,45 @@ allprojects {
     }
 }
 
+// Configure Java toolchain for all projects - use Java 17 for all
+allprojects {
+    afterEvaluate { project ->
+        if (project.plugins.hasPlugin("java")) {
+            project.java {
+                toolchain {
+                    languageVersion = JavaLanguageVersion.of(17)
+                }
+            }
+        }
+        if (project.plugins.hasPlugin("com.android.application") || project.plugins.hasPlugin("com.android.library")) {
+            project.android {
+                compileOptions {
+                    sourceCompatibility = JavaVersion.VERSION_17
+                    targetCompatibility = JavaVersion.VERSION_17
+                }
+                if (project.hasProperty('android') && project.android.hasProperty('kotlinOptions')) {
+                    project.android.kotlinOptions {
+                        jvmTarget = "17"
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Force Java 17 toolchain for all subprojects
+subprojects {
+    afterEvaluate { project ->
+        if (project.plugins.hasPlugin("java-base")) {
+            project.java {
+                toolchain {
+                    languageVersion = JavaLanguageVersion.of(17)
+                }
+            }
+        }
+    }
+}
+
 subprojects {
     afterEvaluate { project ->
         // check only for "com.android.library" to not modify

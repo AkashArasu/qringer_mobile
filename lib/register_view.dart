@@ -1,8 +1,5 @@
-import 'dart:developer' as developer;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'utils/auth_utils.dart';
 
 class RegisterView extends StatefulWidget {
   const RegisterView({super.key});
@@ -90,8 +87,7 @@ class _RegisterViewState extends State<RegisterView> {
   void signUp(String email, String password) async {
     try {
       // Create user with email and password
-      UserCredential userCredential =
-          await FirebaseAuth.instance.createUserWithEmailAndPassword(
+      await FirebaseAuth.instance.createUserWithEmailAndPassword(
         email: email,
         password: password,
       );
@@ -330,7 +326,9 @@ class _RegisterViewState extends State<RegisterView> {
                             //     _passwordController.text.trim(), context);
                           } else {
                             ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Please fill all the fields correctly')),
+                              const SnackBar(
+                                  content: Text(
+                                      'Please fill all the fields correctly')),
                             );
                           }
                         },

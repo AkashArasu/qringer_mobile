@@ -1,4 +1,4 @@
-# qringer_mobile_stream_io
+# QROnly
 
 A new Flutter project.
 

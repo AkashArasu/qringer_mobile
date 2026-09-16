@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">stream-io-api.com</domain>
+        <domain includeSubdomains="true">getstream.io</domain>
+        <domain includeSubdomains="true">firebase.google.com</domain>
+        <domain includeSubdomains="true">fcm.googleapis.com</domain>
+    </domain-config>
+</network-security-config>

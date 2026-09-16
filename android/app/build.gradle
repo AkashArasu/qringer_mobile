@@ -30,13 +30,21 @@ android {
     namespace = "com.example.qringer_mobile_stream_io"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
-
+    
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_1_8
-        targetCompatibility = JavaVersion.VERSION_1_8
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
+    
     kotlinOptions {
-        jvmTarget = "1.8"
+        jvmTarget = "17"
+    }
+    
+    // Configure Java toolchain
+    java {
+        toolchain {
+            languageVersion = JavaLanguageVersion.of(17)
+        }
     }
 
     defaultConfig {
@@ -44,7 +52,7 @@ android {
         applicationId = "com.example.qringer_mobile_stream_io"
         // You can update the following values to match your application needs.
         // For more information, see: https://docs.flutter.dev/deployment/android#reviewing-the-gradle-build-configuration.
-        minSdk = localProperties.getProperty('flutter.minSdkVersion').toInteger()
+        minSdk = Math.max(localProperties.getProperty('flutter.minSdkVersion').toInteger(), 19)
         targetSdk = flutter.targetSdkVersion
         versionCode = flutterVersionCode.toInteger()
         versionName = flutterVersionName
@@ -61,4 +69,12 @@ android {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    // The custom QringerFirebaseMessagingService imports Firebase's native
+    // FCM classes, so the app module must expose this dependency directly.
+    // Keep the BoM aligned with firebase_core 3.12.0 in pubspec.lock.
+    implementation platform('com.google.firebase:firebase-bom:33.9.0')
+    implementation 'com.google.firebase:firebase-messaging'
 }

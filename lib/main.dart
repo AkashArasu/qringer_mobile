@@ -1,490 +1,336 @@
-// import 'package:flutter/material.dart';
-
-// void main() {
-//   runApp(const MyApp());
-// }
-
-// class MyApp extends StatelessWidget {
-//   const MyApp({super.key});
-
-//   // This widget is the root of your application.
-//   @override
-//   Widget build(BuildContext context) {
-//     return MaterialApp(
-//       title: 'Flutter Demo',
-//       theme: ThemeData(
-//         // This is the theme of your application.
-//         //
-//         // TRY THIS: Try running your application with "flutter run". You'll see
-//         // the application has a purple toolbar. Then, without quitting the app,
-//         // try changing the seedColor in the colorScheme below to Colors.green
-//         // and then invoke "hot reload" (save your changes or press the "hot
-//         // reload" button in a Flutter-supported IDE, or press "r" if you used
-//         // the command line to start the app).
-//         //
-//         // Notice that the counter didn't reset back to zero; the application
-//         // state is not lost during the reload. To reset the state, use hot
-//         // restart instead.
-//         //
-//         // This works for code too, not just values: Most code changes can be
-//         // tested with just a hot reload.
-//         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
-//         useMaterial3: true,
-//       ),
-//       home: const MyHomePage(title: 'Flutter Demo Home Page'),
-//     );
-//   }
-// }
-
-// class MyHomePage extends StatefulWidget {
-//   const MyHomePage({super.key, required this.title});
-
-//   // This widget is the home page of your application. It is stateful, meaning
-//   // that it has a State object (defined below) that contains fields that affect
-//   // how it looks.
-
-//   // This class is the configuration for the state. It holds the values (in this
-//   // case the title) provided by the parent (in this case the App widget) and
-//   // used by the build method of the State. Fields in a Widget subclass are
-//   // always marked "final".
-
-//   final String title;
-
-//   @override
-//   State<MyHomePage> createState() => _MyHomePageState();
-// }
-
-// class _MyHomePageState extends State<MyHomePage> {
-//   int _counter = 0;
-
-//   void _incrementCounter() {
-//     setState(() {
-//       // This call to setState tells the Flutter framework that something has
-//       // changed in this State, which causes it to rerun the build method below
-//       // so that the display can reflect the updated values. If we changed
-//       // _counter without calling setState(), then the build method would not be
-//       // called again, and so nothing would appear to happen.
-//       _counter++;
-//     });
-//   }
-
-//   @override
-//   Widget build(BuildContext context) {
-//     // This method is rerun every time setState is called, for instance as done
-//     // by the _incrementCounter method above.
-//     //
-//     // The Flutter framework has been optimized to make rerunning build methods
-//     // fast, so that you can just rebuild anything that needs updating rather
-//     // than having to individually change instances of widgets.
-//     return Scaffold(
-//       appBar: AppBar(
-//         // TRY THIS: Try changing the color here to a specific color (to
-//         // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-//         // change color while the other colors stay the same.
-//         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-//         // Here we take the value from the MyHomePage object that was created by
-//         // the App.build method, and use it to set our appbar title.
-//         title: Text(widget.title),
-//       ),
-//       body: Center(
-//         // Center is a layout widget. It takes a single child and positions it
-//         // in the middle of the parent.
-//         child: Column(
-//           // Column is also a layout widget. It takes a list of children and
-//           // arranges them vertically. By default, it sizes itself to fit its
-//           // children horizontally, and tries to be as tall as its parent.
-//           //
-//           // Column has various properties to control how it sizes itself and
-//           // how it positions its children. Here we use mainAxisAlignment to
-//           // center the children vertically; the main axis here is the vertical
-//           // axis because Columns are vertical (the cross axis would be
-//           // horizontal).
-//           //
-//           // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-//           // action in the IDE, or press "p" in the console), to see the
-//           // wireframe for each widget.
-//           mainAxisAlignment: MainAxisAlignment.center,
-//           children: <Widget>[
-//             const Text(
-//               'You have pushed the button this many times:',
-//             ),
-//             Text(
-//               '$_counter',
-//               style: Theme.of(context).textTheme.headlineMedium,
-//             ),
-//           ],
-//         ),
-//       ),
-//       floatingActionButton: FloatingActionButton(
-//         onPressed: _incrementCounter,
-//         tooltip: 'Increment',
-//         child: const Icon(Icons.add),
-//       ), // This trailing comma makes auto-formatting nicer for build methods.
-//     );
-//   }
-// }
-
-// import 'dart:nativewrappers/_internal/vm/lib/ffi_allocation_patch.dart';
-import 'dart:ui';
-
+import 'dart:async';
+import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
-import 'package:qringer_mobile_stream_io/register_view.dart';
-import 'package:qringer_mobile_stream_io/home_view.dart';
-import 'package:qringer_mobile_stream_io/utils/app_init.dart';
-import 'package:qringer_mobile_stream_io/utils/app_keys.dart';
-import 'package:qringer_mobile_stream_io/verify_view.dart';
+import 'package:flutter/services.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:stream_video_flutter/stream_video_flutter.dart' as streamvf;
 import 'package:stream_video_push_notification/stream_video_push_notification.dart';
-import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:firebase_core/firebase_core.dart';
-import 'firebase_options.dart';
-// import 'package:flutter_ringtone_player/flutter_ringtone_player.dart';
-import 'package:rxdart/rxdart.dart';
+import 'package:qringer_mobile_stream_io/callscreen_view.dart';
+import 'package:qringer_mobile_stream_io/home_view.dart';
 import 'package:qringer_mobile_stream_io/login_view.dart';
+
+import 'package:qringer_mobile_stream_io/utils/app_init.dart';
 import 'package:qringer_mobile_stream_io/utils/user.dart';
-import 'package:stream_video/stream_video.dart' as streamv;
+import 'package:qringer_mobile_stream_io/utils/firebase_messaging_handler.dart';
+import 'package:qringer_mobile_stream_io/utils/signaling_client.dart';
+
+import 'firebase_options.dart';
+
+// Apply global green gradient surfaces if needed via themes
+
+/// Enhanced Firebase Messaging setup for reliable background call handling
+Future<void> _setupFirebaseMessaging() async {
+  final messaging = FirebaseMessaging.instance;
+
+  try {
+    debugPrint('🔥 Setting up Firebase Messaging for background calls...');
+
+    // Request permissions with maximum settings for calls
+    final settings = await messaging.requestPermission(
+      alert: true,
+      announcement: false,
+      badge: true,
+      carPlay: false,
+      criticalAlert: true, // iOS: For critical notifications
+      provisional: false,
+      sound: true,
+    );
+
+    debugPrint('🔥 FCM permission status: ${settings.authorizationStatus}');
+
+    if (settings.authorizationStatus == AuthorizationStatus.authorized) {
+      debugPrint('✅ FCM permissions granted');
+
+      // Get FCM token for debugging
+      final token = await messaging.getToken();
+      debugPrint('🔥 FCM Token: ${token?.substring(0, 20)}...');
+
+      // Android-specific: Set foreground notification presentation options
+      if (Platform.isAndroid) {
+        await messaging.setForegroundNotificationPresentationOptions(
+          alert: true,
+          badge: true,
+          sound: true,
+        );
+        // Android 14+ can require explicit user approval before an incoming
+        // call notification may open full-screen over a locked device.
+        await StreamVideoPushNotificationManager
+            .ensureFullScreenIntentPermission();
+      }
+
+      // Configure high-priority delivery for Android
+      if (Platform.isAndroid) {
+        debugPrint('📱 Configuring Android FCM high-priority delivery');
+        // Note: High-priority settings are handled in AndroidManifest.xml
+      }
+    } else {
+      debugPrint('❌ FCM permissions denied: ${settings.authorizationStatus}');
+    }
+  } catch (e) {
+    debugPrint('❌ Error setting up Firebase Messaging: $e');
+  }
+}
+
+/// Returns only a call that the homeowner explicitly accepted in Android's
+/// native notification UI. A merely ringing call must continue to open Home,
+/// otherwise launching the app manually could answer a visitor accidentally.
+Future<Map<String, dynamic>?> _acceptedNativeCallForColdStart() async {
+  if (!Platform.isAndroid) return null;
+  try {
+    for (var attempt = 0; attempt < 4; attempt++) {
+      final calls = await FlutterCallkitIncoming.activeCalls();
+      for (final raw in calls) {
+        if (raw is! Map) continue;
+        final call = Map<String, dynamic>.from(raw);
+        if (call['isAccepted'] == true) return call;
+      }
+      if (attempt < 3) {
+        await Future<void>.delayed(const Duration(milliseconds: 250));
+      }
+    }
+  } catch (error) {
+    debugPrint('Cold-start native call lookup failed: $error');
+  }
+  return null;
+}
 
 Future<void> main() async {
+  // Initialize Flutter binding
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Set preferred orientations for better performance
+  await SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+    DeviceOrientation.portraitDown,
+  ]);
+
+  // Set system UI overlay style for better integration
+  SystemChrome.setSystemUIOverlayStyle(
+    const SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: Brightness.light,
+      systemNavigationBarColor: Color(0xFF1A1A2E),
+      systemNavigationBarIconBrightness: Brightness.light,
+    ),
+  );
+
+  // Initialize Firebase
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
-  final storedUser = await AppInitializer.getStoredUser();
+
+  // Register Firebase Cloud Messaging background handler
+  // This ensures notifications work when app is in background or terminated
+  FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+
+  // Read these independently of the Stream connection. Passing the saved
+  // preference into HomeView prevents a video-to-audio visual jump on every
+  // cold start for an audio-only homeowner.
+  final storedUserFuture = AppInitializer.getStoredUser();
+  final callPreferenceFuture = BackgroundStreamVideoManager.getCallPreference();
+  final storedUser = await storedUserFuture;
+  final initialVideoCall = await callPreferenceFuture;
+  Map<String, dynamic>? acceptedNativeCall;
 
   if (storedUser != null) {
     await AppInitializer.init(storedUser);
+    acceptedNativeCall = await _acceptedNativeCallForColdStart();
   }
-  runApp(MainApp(storedUser: storedUser));
-  // runApp(const MyApp());
+
+  // Render as soon as the authenticated Stream client is available. Permission
+  // and token-refresh work is not required to consume an Answer action, and
+  // doing it before runApp made notification-launched startup unnecessarily
+  // slow.
+  runApp(QROnlyApp(
+    storedUser: storedUser,
+    initialVideoCall: initialVideoCall,
+    acceptedNativeCall: acceptedNativeCall,
+  ));
+
+  unawaited(_setupFirebaseMessaging());
 }
 
-class MainApp extends StatefulWidget {
+class QROnlyApp extends StatelessWidget {
   final User? storedUser;
+  final bool? initialVideoCall;
+  final Map<String, dynamic>? acceptedNativeCall;
 
-  const MainApp({
+  /// Allows widget tests to verify initial routing without loading Firebase.
+  /// Production uses [LoginView].
+  final Widget Function()? unauthenticatedHomeBuilder;
+
+  const QROnlyApp({
     this.storedUser,
+    this.initialVideoCall,
+    this.acceptedNativeCall,
+    this.unauthenticatedHomeBuilder,
     super.key,
   });
 
   @override
-  State<MainApp> createState() => _MainAppState();
-}
-
-class _MainAppState extends State<MainApp> {
-  @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      home: widget.storedUser == null ? const LoginView() : const HomeView(),
-    );
-  }
-}
-
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Call Receiver',
+      title: 'QROnly - Digital Doorbell',
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.green),
+        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF1A3A1A)),
         useMaterial3: true,
+        fontFamily: 'Inter',
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Color(0xFF1A3A1A),
+          foregroundColor: Colors.white,
+        ),
+        // Performance optimizations
+        pageTransitionsTheme: const PageTransitionsTheme(
+          builders: {
+            TargetPlatform.android: CupertinoPageTransitionsBuilder(),
+            TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+            TargetPlatform.windows: CupertinoPageTransitionsBuilder(),
+            TargetPlatform.macOS: CupertinoPageTransitionsBuilder(),
+            TargetPlatform.linux: CupertinoPageTransitionsBuilder(),
+          },
+        ),
+        visualDensity: VisualDensity.adaptivePlatformDensity,
       ),
-      home: const LoginView(),
+      debugShowCheckedModeBanner: false,
+      // Use builder to apply global performance optimizations
+      builder: (context, child) {
+        return MediaQuery(
+          // Disable text scaling for consistent UI
+          data: MediaQuery.of(context).copyWith(
+            textScaler: const TextScaler.linear(1.0),
+          ),
+          child: child!,
+        );
+      },
+      home: _getInitialScreen(),
     );
+  }
+
+  Widget _getInitialScreen() {
+    // If no stored user, always go to login
+    if (storedUser == null) {
+      return unauthenticatedHomeBuilder?.call() ?? const LoginView();
+    }
+
+    // Normal flow - go to home screen
+    final acceptedCall = acceptedNativeCall;
+    if (acceptedCall != null && initialVideoCall != null) {
+      return ColdStartCallScreen(
+        nativeCall: acceptedCall,
+        videoCall: initialVideoCall!,
+      );
+    }
+    return HomeView(initialVideoCall: initialVideoCall);
   }
 }
 
-class CallReceiverPage extends StatefulWidget {
-  const CallReceiverPage({super.key});
+/// First route for an Answer action that launched a terminated Android app.
+/// It intentionally has no Home UI: native Answer has already expressed the
+/// homeowner's intent, so the only visible state while Stream resolves the
+/// call is a branded connecting screen.
+class ColdStartCallScreen extends StatefulWidget {
+  const ColdStartCallScreen({
+    required this.nativeCall,
+    required this.videoCall,
+    super.key,
+  });
+
+  final Map<String, dynamic> nativeCall;
+  final bool videoCall;
 
   @override
-  State<CallReceiverPage> createState() => _CallReceiverPageState();
+  State<ColdStartCallScreen> createState() => _ColdStartCallScreenState();
 }
 
-class _CallReceiverPageState extends State<CallReceiverPage>
-    with WidgetsBindingObserver {
-  late final streamvf.StreamVideo _streamVideo;
-  streamvf.Call? _call;
-  bool _isReceivingCall = false;
-  String? _incomingCallId;
-  // final FirebaseMessaging _firebaseMessaging = FirebaseMessaging.instance;
-  final _compositeSubscription = CompositeSubscription();
+class _ColdStartCallScreenState extends State<ColdStartCallScreen> {
+  String _status = 'Connecting to visitor…';
+  bool _started = false;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
-    _initializeServices();
-  }
-
-  Future<void> _initializeServices() async {
-    // await Firebase.initializeApp();
-    _initializeStreamVideo();
-    // await _initializePushNotifications();
-    // _setupCallHandlers();
-    _observeCallKitEvents();
-  }
-
-  void _initializeStreamVideo() {
-    _streamVideo = streamvf.StreamVideo(
-      'y8h5754fwgma',
-      user: streamvf.User.regular(
-        userId: 'homeowner',
-        name: 'Aashika',
-        role: 'user',
-      ),
-
-      userToken:
-          'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoiaG9tZW93bmVyIn0.dCKk27c3QZiJsBZxnMW5PHpSxbwPD6QdjSTWBsNzIY0',
-
-      options: const streamvf.StreamVideoOptions(
-        // It's important to keep connections alive when the app is in the background to properly handle incoming calls while the app is in the background
-        keepConnectionsAliveWhenInBackground: true,
-      ),
-      // pushNotificationManagerProvider:
-      //     StreamVideoPushNotificationManager.create(
-      //   iosPushProvider:
-      //       const StreamVideoPushProvider.apn(name: 'ios-provider-name'),
-      //   androidPushProvider: const StreamVideoPushProvider.firebase(
-      //       name: 'firebase_push_provider'),
-      //   pushParams: const StreamVideoPushParams(
-      //     appName: "qringer_mobile_stream_io",
-      //     ios: IOSParams(iconName: "IconMask"),
-      //   ),
-      // ),
-    );
-  }
-
-  // void _setupCallHandlers() {
-
-  //   _streamVideo.state.incomingCall.listen((call) async {
-  //     setState(() {
-  //       _isReceivingCall = true;
-  //       _incomingCallId = call!.id;
-  //     });
-
-  //     // Play ringtone
-  //     FlutterRingtonePlayer.playRingtone();
-
-  //     // Show incoming call UI
-  //     _showIncomingCallDialog(call!);
-  //   });
-  // }
-
-  Future<void> _observeCallKitEvents() async {
-    // final streamVideo = StreamVideo.instance;
-    // You can use our helper method to observe core CallKit events
-    // It will handled call accepted, declined and ended events
-
-    // _compositeSubscription.add(_streamVideo.observeCoreCallKitEvents(
-    //   onCallAccepted: (callToJoin) {
-    //     // _acceptCall(callToJoin);
-    //     _showIncomingCallDialog(callToJoin);
-
-    //     // <---- IMPLEMENT NAVIGATION TO CALL SCREEN HERE
-    //   },
-    // ));
-
-    _compositeSubscription
-        .add(_streamVideo.state.incomingCall.listen((call) async {
-      setState(() {
-        _isReceivingCall = true;
-        _incomingCallId = call!.id;
-      });
-
-      // Play ringtone
-      // FlutterRingtonePlayer.playRingtone();
-
-      // Show incoming call UI
-      _showIncomingCallDialog(call!);
-      // _acceptCall(call!);
-    }));
-
-    // Or you can handle them by yourself, and/or add additional events such as handling mute events from CallKit
-    // _compositeSubscription.add(streamVideo.onCallKitEvent<ActionCallToggleMute>(_onCallToggleMute));
-  }
-
-  // Future<void> _initializePushNotifications() async {
-  //   await _firebaseMessaging.requestPermission();
-  //   final fcmToken = await _firebaseMessaging.getToken();
-
-  //   // Register FCM token with Stream
-  //   await _streamVideo.addDevice(
-  //     // deviceId: fcmToken!,
-  //     pushToken: fcmToken!,
-  //     pushProvider: PushProvider.firebase,
-  //   );
-
-  //   // Handle foreground messages
-  //   FirebaseMessaging.onMessage.listen(_handlePushNotification);
-
-  //   // Handle background/terminated messages
-  //   FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
-
-  //   // Handle when app is opened from terminated state
-  //   final initialMessage = await _firebaseMessaging.getInitialMessage();
-  //   if (initialMessage != null) {
-  //     _handlePushNotification(initialMessage);
-  //   }
-  // }
-
-  // Future<void> _handlePushNotification(RemoteMessage message) async {
-  //   if (message.data['type'] == 'call') {
-  //     final callId = message.data['call_id'];
-  //     final callCid = message.data['call_cid'];
-
-  //     final call = await _streamVideo.getCall(callCid);
-  //     setState(() {
-  //       _isReceivingCall = true;
-  //       _incomingCallId = callId;
-  //     });
-
-  //     FlutterRingtonePlayer.playRingtone();
-  //     _showIncomingCallDialog(call);
-  //   }
-  // }
-
-  Future<void> _showIncomingCallDialog(streamvf.Call call) async {
-    return showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: const Text('Incoming Call'),
-        content: Text('Call from ${call.id}'),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              _rejectCall(call);
-            },
-            child: const Text('Decline'),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              _acceptCall(call);
-            },
-            child: const Text('Accept'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _acceptCall(streamvf.Call call) async {
-    // FlutterRingtonePlayer.stop();
-    setState(() {
-      _call = call;
-      _isReceivingCall = false;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_openAcceptedCall());
     });
-
-    // final callCredentials = await _streamVideo.getCallCredentials(
-    //   callId: call.id,
-    //   callType: call.type,
-    // );
-
-    await _call?.join(
-        connectOptions: streamvf.CallConnectOptions(
-      camera: streamvf.TrackOption.disabled(),
-    ));
   }
 
-  Future<void> _rejectCall(streamvf.Call call) async {
-    // FlutterRingtonePlayer.stop();
-    await call.reject();
-    setState(() {
-      _isReceivingCall = false;
-      _incomingCallId = null;
-    });
+  Future<void> _openAcceptedCall() async {
+    if (_started) return;
+    _started = true;
+    final uuid = widget.nativeCall['id'] as String?;
+    final extra = widget.nativeCall['extra'];
+    final callCid = extra is Map ? extra['callCid'] as String? : null;
+    if (uuid == null || callCid == null) {
+      await _fallbackToHome('The accepted call data is unavailable.');
+      return;
+    }
+
+    try {
+      final result = await streamvf.StreamVideo.instance.consumeIncomingCall(
+        uuid: uuid,
+        cid: callCid,
+      );
+      final call = result.getDataOrNull();
+      if (call == null) throw StateError('Stream call could not be restored');
+      final accepted = await call.accept();
+      if (accepted.isFailure)
+        throw StateError('Stream rejected the accepted call');
+      await SignalingClient.accept(call.callCid.id);
+      // Remove the native ringing card before presenting the in-call route.
+      await FlutterCallkitIncoming.endCall(uuid);
+      if (!mounted) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => CallScreen(call: call, videoCall: widget.videoCall),
+        ),
+      );
+      // CallScreen pops when the visitor or homeowner ends the call. Return
+      // to the normal homeowner home route without ever showing the
+      // connecting screen again.
+      if (mounted) {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const HomeView()),
+        );
+      }
+    } catch (error, stackTrace) {
+      debugPrint('Direct cold-start call routing failed: $error');
+      debugPrintStack(stackTrace: stackTrace);
+      await _fallbackToHome('Unable to open the call.');
+    }
+  }
+
+  Future<void> _fallbackToHome(String message) async {
+    if (!mounted) return;
+    setState(() => _status = message);
+    await Future<void>.delayed(const Duration(milliseconds: 500));
+    if (!mounted) return;
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(builder: (_) => const HomeView()),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Call Receiver')),
-      body: _call != null
-          ? streamvf.StreamCallContainer(
-              call: _call!,
-              callContentBuilder: (context, call, participants) {
-                return streamvf.StreamCallContent(
-                  call: call,
-                  callState: participants,
-                  layoutMode: streamvf.ParticipantLayoutMode.spotlight,
-                  callAppBarBuilder: (context, call, callState) {
-                    return AppBar(
-                      actions: const [],
-                    );
-                  },
-                  callControlsBuilder: (context, call, callState) {
-                    final localParticipant = callState.localParticipant!;
-                    return streamvf.StreamCallControls(options: [
-                      streamvf.LeaveCallOption(
-                          call: call,
-                          onLeaveCallTap: () async {
-                            await call.leave();
-                            setState(() => _call = null);
-                          }),
-                      streamvf.ToggleCameraOption(
-                          call: call, localParticipant: localParticipant),
-                      streamvf.ToggleMicrophoneOption(
-                          call: call, localParticipant: localParticipant),
-                      streamvf.ToggleSpeakerphoneOption(call: call),
-                    ]);
-                  },
-                );
-
-                // return Stack(
-                //   children: [
-                //     participants.participantCount > 0
-                //         ? GridView.count(
-                //             crossAxisCount:
-                //                 2, //participants.length == 1 ? 1 : 2,
-                //             children: participants.callParticipants
-                //                 .map((participant) {
-                //               return StreamVideoRenderer(
-                //                 call: call,
-                //                 participant: participant,
-                //                 videoTrackType: SfuTrackType.video,
-                //               );
-                //             }).toList(),
-                //           )
-                //         : const Center(
-                //             child: Text('Waiting for participants...'),
-                //           ),
-                //     Positioned(
-                //       bottom: 32,
-                //       left: 0,
-                //       right: 0,
-                //       child: Row(
-                //         mainAxisAlignment: MainAxisAlignment.center,
-                //         children: [
-                //           FloatingActionButton(
-                //             backgroundColor: Colors.red,
-                //             onPressed: () async {
-                //               await _call?.leave();
-                //               setState(() => _call = null);
-                //             },
-                //             child: const Icon(Icons.call_end),
-                //           ),
-                //         ],
-                //       ),
-                //     ),
-                //   ],
-                // );
-              },
-            )
-          : const Center(
-              child: Text('Waiting for calls'),
+      backgroundColor: const Color(0xFF0D1B2A),
+      body: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.doorbell, color: Colors.lightGreen, size: 72),
+            const SizedBox(height: 24),
+            Text(
+              _status,
+              style: const TextStyle(color: Colors.white, fontSize: 22),
+              textAlign: TextAlign.center,
             ),
+            const SizedBox(height: 24),
+            const CircularProgressIndicator(color: Colors.lightGreen),
+          ],
+        ),
+      ),
     );
-  }
-
-  @override
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    _call?.leave();
-    super.dispose();
-    _compositeSubscription.cancel();
   }
 }
