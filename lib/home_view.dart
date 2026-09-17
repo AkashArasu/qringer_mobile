@@ -277,7 +277,9 @@ class _HomeViewState extends State<HomeView> with WidgetsBindingObserver {
     } catch (error, stackTrace) {
       debugPrint('CallKit accept failed: $error');
       debugPrintStack(stackTrace: stackTrace);
-      if (mounted) _showErrorSnackBar('Unable to answer the incoming call');
+      if (mounted && error is! CallUnavailableException) {
+        _showErrorSnackBar('Unable to answer the incoming call');
+      }
     } finally {
       _isHandlingCallKitAction = false;
     }

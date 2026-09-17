@@ -255,9 +255,8 @@ class ColdStartCallScreen extends StatefulWidget {
 }
 
 class _ColdStartCallScreenState extends State<ColdStartCallScreen> {
-  String _status = 'Connecting to visitor…';
+  final String _status = 'Connecting to visitor…';
   bool _started = false;
-  bool _failed = false;
 
   @override
   void initState() {
@@ -305,11 +304,25 @@ class _ColdStartCallScreenState extends State<ColdStartCallScreen> {
   }
 
   Future<void> _fallbackToHome(String message) async {
+    debugPrint(message);
+    final uuid = widget.nativeCall['id'] as String?;
+    if (uuid != null) {
+      try {
+        await IncomingAnswer.acknowledge(uuid);
+      } catch (error) {
+        debugPrint('Answer cleanup failed: $error');
+      }
+      try {
+        await FlutterCallkitIncoming.endCall(uuid);
+      } catch (error) {
+        debugPrint('Native call cleanup failed: $error');
+      }
+    }
     if (!mounted) return;
-    setState(() {
-      _status = message;
-      _failed = true;
-    });
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(
+          builder: (_) => HomeView(initialVideoCall: widget.videoCall)),
+    );
   }
 
   @override
@@ -328,17 +341,7 @@ class _ColdStartCallScreenState extends State<ColdStartCallScreen> {
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 24),
-            if (!_failed)
-              const CircularProgressIndicator(color: Colors.lightGreen)
-            else
-              TextButton(
-                onPressed: () => Navigator.of(context).pushReplacement(
-                  MaterialPageRoute(
-                      builder: (_) =>
-                          HomeView(initialVideoCall: widget.videoCall)),
-                ),
-                child: const Text('Return home'),
-              ),
+            const CircularProgressIndicator(color: Colors.lightGreen),
           ],
         ),
       ),

@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:stream_video_flutter/stream_video_flutter.dart';
 import 'signaling_client.dart';
 
@@ -55,12 +56,23 @@ class IncomingAnswer {
           'QROnly call ready cid=$cid elapsedMs=${timer.elapsedMilliseconds}');
       return call;
     } catch (_) {
+      // Both persisted launch intent and plugin active-call record must be
+      // cleared, otherwise Home's resume recovery retries the expired Answer.
+      try {
+        await acknowledge(uuid);
+      } catch (error) {
+        debugPrint('Answer cleanup failed: $error');
+      }
+      try {
+        await FlutterCallkitIncoming.endCall(uuid);
+      } catch (error) {
+        debugPrint('Native call cleanup failed: $error');
+      }
       if (accepted) {
         try {
           await SignalingClient.end(callId);
         } catch (_) {}
       }
-      await acknowledge(uuid);
       rethrow;
     }
   }
