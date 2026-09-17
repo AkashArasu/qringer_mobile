@@ -5,8 +5,29 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:qringer_mobile_stream_io/main.dart';
 import 'package:qringer_mobile_stream_io/utils/app_init.dart';
 import 'package:qringer_mobile_stream_io/utils/firebase_messaging_handler.dart';
+import 'package:qringer_mobile_stream_io/utils/signaling_client.dart';
 
 void main() {
+  test('Answer never joins a timed out, cancelled, or malformed session', () {
+    for (final status in [
+      'no_answer',
+      'cancelled',
+      'ended',
+      'declined',
+      null
+    ]) {
+      expect(
+          () =>
+              SignalingClient.validateTransition('accept', {'status': status}),
+          throwsA(isA<CallUnavailableException>()));
+    }
+    expect(
+        () => SignalingClient.validateTransition(
+            'accept', {'status': 'accepted'}),
+        returnsNormally);
+    expect(() => SignalingClient.validateTransition('end', {'status': 'ended'}),
+        returnsNormally);
+  });
   testWidgets('unauthenticated homeowner is routed to sign in', (tester) async {
     await tester.pumpWidget(
       QROnlyApp(

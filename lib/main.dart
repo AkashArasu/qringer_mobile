@@ -5,7 +5,6 @@ import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
-import 'package:stream_video_flutter/stream_video_flutter.dart' as streamvf;
 import 'package:stream_video_push_notification/stream_video_push_notification.dart';
 import 'package:qringer_mobile_stream_io/callscreen_view.dart';
 import 'package:qringer_mobile_stream_io/home_view.dart';
@@ -14,9 +13,9 @@ import 'package:qringer_mobile_stream_io/login_view.dart';
 import 'package:qringer_mobile_stream_io/utils/app_init.dart';
 import 'package:qringer_mobile_stream_io/utils/user.dart';
 import 'package:qringer_mobile_stream_io/utils/firebase_messaging_handler.dart';
-import 'package:qringer_mobile_stream_io/utils/signaling_client.dart';
 
 import 'firebase_options.dart';
+import 'utils/incoming_answer.dart';
 
 // Apply global green gradient surfaces if needed via themes
 
@@ -80,6 +79,8 @@ Future<void> _setupFirebaseMessaging() async {
 Future<Map<String, dynamic>?> _acceptedNativeCallForColdStart() async {
   if (!Platform.isAndroid) return null;
   try {
+    final pending = await IncomingAnswer.readNative();
+    if (pending != null) return pending;
     for (var attempt = 0; attempt < 4; attempt++) {
       final calls = await FlutterCallkitIncoming.activeCalls();
       for (final raw in calls) {
@@ -256,6 +257,7 @@ class ColdStartCallScreen extends StatefulWidget {
 class _ColdStartCallScreenState extends State<ColdStartCallScreen> {
   String _status = 'Connecting to visitor…';
   bool _started = false;
+  bool _failed = false;
 
   @override
   void initState() {
@@ -277,18 +279,7 @@ class _ColdStartCallScreenState extends State<ColdStartCallScreen> {
     }
 
     try {
-      final ready = await AppInitializer.ensurePushRegistration(maxAttempts: 3);
-      if (!ready) throw StateError('Stream is not connected');
-      final result = await streamvf.StreamVideo.instance.consumeIncomingCall(
-        uuid: uuid,
-        cid: callCid,
-      );
-      final call = result.getDataOrNull();
-      if (call == null) throw StateError('Stream call could not be restored');
-      final accepted = await call.accept();
-      if (accepted.isFailure)
-        throw StateError('Stream rejected the accepted call');
-      await SignalingClient.accept(call.callCid.id);
+      final call = await IncomingAnswer.accept(uuid, callCid);
       // Remove the native ringing card before presenting the in-call route.
       await FlutterCallkitIncoming.endCall(uuid);
       if (!mounted) return;
@@ -308,18 +299,17 @@ class _ColdStartCallScreenState extends State<ColdStartCallScreen> {
     } catch (error, stackTrace) {
       debugPrint('Direct cold-start call routing failed: $error');
       debugPrintStack(stackTrace: stackTrace);
-      await _fallbackToHome('Unable to open the call.');
+      await _fallbackToHome(
+          'Unable to connect this call. It may have ended. Please ask the visitor to try again.');
     }
   }
 
   Future<void> _fallbackToHome(String message) async {
     if (!mounted) return;
-    setState(() => _status = message);
-    await Future<void>.delayed(const Duration(milliseconds: 500));
-    if (!mounted) return;
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => const HomeView()),
-    );
+    setState(() {
+      _status = message;
+      _failed = true;
+    });
   }
 
   @override
@@ -338,7 +328,17 @@ class _ColdStartCallScreenState extends State<ColdStartCallScreen> {
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 24),
-            const CircularProgressIndicator(color: Colors.lightGreen),
+            if (!_failed)
+              const CircularProgressIndicator(color: Colors.lightGreen)
+            else
+              TextButton(
+                onPressed: () => Navigator.of(context).pushReplacement(
+                  MaterialPageRoute(
+                      builder: (_) =>
+                          HomeView(initialVideoCall: widget.videoCall)),
+                ),
+                child: const Text('Return home'),
+              ),
           ],
         ),
       ),

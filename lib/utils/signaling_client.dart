@@ -5,6 +5,12 @@ import 'package:qringer_mobile_stream_io/utils/app_init.dart';
 import 'package:qringer_mobile_stream_io/utils/app_keys.dart';
 
 class SignalingClient {
+  static void validateTransition(String action, Map<String, dynamic> state) {
+    if (action == 'accept' && state['status'] != 'accepted') {
+      throw CallUnavailableException();
+    }
+  }
+
   static Future<void> accept(String callId) => _transition(callId, 'accept');
   static Future<void> reject(String callId) => _transition(callId, 'reject');
   static Future<void> end(String callId) => _transition(callId, 'end');
@@ -38,7 +44,11 @@ class SignalingClient {
               body: jsonEncode({'propertyId': propertyId}),
             )
             .timeout(const Duration(seconds: 8));
-        if (response.statusCode >= 200 && response.statusCode < 300) return;
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+          final state = jsonDecode(response.body) as Map<String, dynamic>;
+          validateTransition(action, state);
+          return;
+        }
 
         lastError = StateError(
           'Unable to $action call (${response.statusCode})',
@@ -49,6 +59,7 @@ class SignalingClient {
             response.statusCode >= 500;
         if (!retryable) throw lastError;
       } catch (error) {
+        if (error is CallUnavailableException) rethrow;
         lastError = error;
         if (attempt == 3) rethrow;
       }
@@ -57,4 +68,9 @@ class SignalingClient {
     }
     throw lastError ?? StateError('Unable to $action call');
   }
+}
+
+class CallUnavailableException implements Exception {
+  @override
+  String toString() => 'This call has ended or is no longer available.';
 }

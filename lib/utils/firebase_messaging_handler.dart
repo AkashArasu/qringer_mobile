@@ -2,6 +2,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
+import 'package:flutter_callkit_incoming/entities/entities.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:qringer_mobile_stream_io/firebase_options.dart';
 import 'package:qringer_mobile_stream_io/utils/app_init.dart';
@@ -130,6 +131,70 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     final storedUser = await AppInitializer.getStoredUser();
     if (storedUser == null) {
       debugPrint('Cannot ring in background: no signed-in homeowner');
+      return;
+    }
+
+    if (defaultTargetPlatform == TargetPlatform.android &&
+        payload['type'] == 'call.ring') {
+      final sentAt = message.sentTime;
+      final age =
+          sentAt == null ? 0 : DateTime.now().difference(sentAt).inMilliseconds;
+      final remaining = 30000 - age;
+      if (remaining <= 0 || callCid == null || !callCid.startsWith('default:'))
+        return;
+      final id = callCid.substring('default:'.length);
+      if (!RegExp(r'^[a-f0-9]{32}$').hasMatch(id)) return;
+      final uuid =
+          '${id.substring(0, 8)}-${id.substring(8, 12)}-${id.substring(12, 16)}-${id.substring(16, 20)}-${id.substring(20)}';
+      // Ring from the delivered FCM payload. Firebase/Stream token refresh
+      // and call lookup happen only when answering, not before presentation.
+      await FlutterCallkitIncoming.showCallkitIncoming(CallKitParams(
+        id: uuid,
+        nameCaller: 'Visitor',
+        appName: 'QROnly',
+        handle: 'Visitor at your door',
+        type: 0,
+        duration: remaining.clamp(1, 30000),
+        textAccept: 'Accept',
+        textDecline: 'Decline',
+        extra: {'callCid': callCid},
+        missedCallNotification: const NotificationParams(
+            showNotification: true,
+            isShowCallback: false,
+            subtitle: 'Missed visitor'),
+        android: const AndroidParams(
+            isCustomNotification: true,
+            ringtonePath: 'system_ringtone_default',
+            incomingCallNotificationChannelName: 'Incoming Call'),
+      ));
+      debugPrint(
+          'QROnly ring presented cid=$callCid pushAgeMs=$age at=${DateTime.now().toUtc().toIso8601String()}');
+      // Validate after presenting, so a cancelled call can be removed without
+      // making every legitimate ring wait for authentication/network access.
+      try {
+        final client = streamvf.StreamVideo.isInitialized()
+            ? streamvf.StreamVideo.instance
+            : await AppInitializer.init(storedUser, connect: false);
+        final state = await client
+            .getCallRingingState(
+              callType: streamvf.StreamCallType.defaultType(),
+              id: id,
+            )
+            .timeout(const Duration(seconds: 8));
+        if (state == streamvf.CallRingingState.rejected ||
+            state == streamvf.CallRingingState.accepted) {
+          final calls = await FlutterCallkitIncoming.activeCalls();
+          final locallyAccepted = calls.any((raw) =>
+              raw is Map &&
+              callCidFromNativeCall(raw) == callCid &&
+              raw['isAccepted'] == true);
+          if (!locallyAccepted) await FlutterCallkitIncoming.endCall(uuid);
+        }
+        // SDK maps lookup failures to `ended`; do not silence a valid ring
+        // just because the verification request failed. Native expiry bounds it.
+      } catch (error) {
+        debugPrint('Post-presentation validation deferred: $error');
+      }
       return;
     }
 

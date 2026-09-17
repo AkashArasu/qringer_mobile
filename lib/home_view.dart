@@ -14,6 +14,7 @@ import 'package:stream_video_flutter/stream_video_flutter.dart' as streamvf;
 import 'package:qringer_mobile_stream_io/utils/firebase_messaging_handler.dart';
 import 'package:qringer_mobile_stream_io/utils/app_theme.dart';
 import 'package:qringer_mobile_stream_io/utils/signaling_client.dart';
+import 'package:qringer_mobile_stream_io/utils/incoming_answer.dart';
 
 // Grid pattern painter for drawer header
 class GridPainter extends CustomPainter {
@@ -142,7 +143,6 @@ class _HomeViewState extends State<HomeView> with WidgetsBindingObserver {
         return true;
       }
 
-      await AppInitializer.ensurePushRegistration(maxAttempts: 2);
       final startTime = DateTime.now();
       final result = await streamvf.StreamVideo.instance
           .handleRingingFlowNotifications(message.data)
@@ -216,12 +216,18 @@ class _HomeViewState extends State<HomeView> with WidgetsBindingObserver {
   }
 
   Future<void> _recoverAcceptedNativeCall() async {
+    if (!_callPreferenceLoaded || !mounted) return;
     // Android's receiver writes the accepted flag immediately after emitting
     // its EventChannel event. Four short attempts cover a cold Flutter engine
     // without making normal launches wait or auto-answer ringing calls.
     for (var attempt = 1; attempt <= 4; attempt++) {
       if (_isHandlingCallKitAction || _hasOpenedIncomingCall) return;
       try {
+        final pending = await IncomingAnswer.readNative();
+        if (pending != null) {
+          await _acceptCallKitCall(pending);
+          return;
+        }
         final activeCalls = await FlutterCallkitIncoming.activeCalls();
         final acceptedCall =
             activeCalls.cast<dynamic>().whereType<Map>().cast<Map>().firstWhere(
@@ -262,18 +268,8 @@ class _HomeViewState extends State<HomeView> with WidgetsBindingObserver {
     _isHandlingCallKitAction = true;
     try {
       debugPrint('Consuming accepted native call: cid=$callCid');
-      final client = streamvf.StreamVideo.instance;
-      final result = await client.consumeIncomingCall(uuid: uuid, cid: callCid);
-      final callToJoin = result.getDataOrNull();
-      if (callToJoin == null) {
-        debugPrint('CallKit accept ignored: Stream could not consume $callCid');
-        return;
-      }
-      final accepted = await callToJoin.accept();
-      if (accepted.isFailure) {
-        debugPrint('CallKit accept failed in Stream: $accepted');
-        return;
-      }
+      if (_hasOpenedIncomingCall) return;
+      final callToJoin = await IncomingAnswer.accept(uuid, callCid);
       debugPrint(
           'Native call accepted; routing directly to CallScreen: ${callToJoin.callCid}');
       await _acceptAndOpenCall(callToJoin, source: 'CallKit');
@@ -321,7 +317,6 @@ class _HomeViewState extends State<HomeView> with WidgetsBindingObserver {
     try {
       debugPrint(
           'Marking QROnly call accepted and opening screen: ${callToJoin.callCid}, video=$videoCall');
-      await SignalingClient.accept(callCid);
       await _handleCallJoin(callToJoin, source);
     } catch (_) {
       _hasOpenedIncomingCall = false;
