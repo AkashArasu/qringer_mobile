@@ -13,26 +13,15 @@
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     
-    <!-- CallKit permissions for terminated state calls -->
+    <!-- Stream's native incoming-call UI and ongoing call service. -->
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT"/>
     <uses-permission android:name="android.permission.MANAGE_OWN_CALLS"/>
-    <uses-permission android:name="android.permission.READ_PHONE_STATE"/>
-    <uses-permission android:name="android.permission.CALL_PHONE"/>
-    <uses-permission android:name="android.permission.ADD_VOICEMAIL"/>
-    <uses-permission android:name="com.android.voicemail.permission.WRITE_VOICEMAIL"/>
     
-    <!-- Critical permissions for background call handling -->
+    <!-- Background incoming-call handling. -->
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_PHONE_CALL"/>
     <uses-permission android:name="android.permission.VIBRATE"/>
-    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
-    <uses-permission android:name="android.permission.DISABLE_KEYGUARD"/>
-    <uses-permission android:name="android.permission.TURN_SCREEN_ON"/>
-    
-    <!-- Auto-start and battery optimization exemptions -->
-    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
-    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
 
 
     <application
@@ -88,8 +77,6 @@
             android:name="com.google.firebase.messaging.default_notification_channel_id"
             android:value="qronly_calls" />
             
-        <!-- CallKit activities, receiver and services are merged from the
-             flutter_callkit_incoming plugin manifest. -->
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

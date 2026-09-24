@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
+import 'package:stream_video_flutter/stream_video_flutter.dart' as streamvf;
 import 'package:stream_video_push_notification/stream_video_push_notification.dart';
 import 'package:qringer_mobile_stream_io/callscreen_view.dart';
 import 'package:qringer_mobile_stream_io/home_view.dart';
@@ -73,21 +73,15 @@ Future<void> _setupFirebaseMessaging() async {
   }
 }
 
-/// Returns only a call that the homeowner explicitly accepted in Android's
+/// Returns only a call that the homeowner explicitly accepted in the native
 /// native notification UI. A merely ringing call must continue to open Home,
 /// otherwise launching the app manually could answer a visitor accidentally.
-Future<Map<String, dynamic>?> _acceptedNativeCallForColdStart() async {
-  if (!Platform.isAndroid) return null;
+Future<streamvf.CallData?> _acceptedNativeCallForColdStart() async {
+  if (!Platform.isAndroid && !Platform.isIOS) return null;
   try {
-    final pending = await IncomingAnswer.readNative();
-    if (pending != null) return pending;
     for (var attempt = 0; attempt < 4; attempt++) {
-      final calls = await FlutterCallkitIncoming.activeCalls();
-      for (final raw in calls) {
-        if (raw is! Map) continue;
-        final call = Map<String, dynamic>.from(raw);
-        if (call['isAccepted'] == true) return call;
-      }
+      final call = await acceptedNativeCall();
+      if (call != null) return call;
       if (attempt < 3) {
         await Future<void>.delayed(const Duration(milliseconds: 250));
       }
@@ -134,7 +128,7 @@ Future<void> main() async {
   final callPreferenceFuture = BackgroundStreamVideoManager.getCallPreference();
   final storedUser = await storedUserFuture;
   final initialVideoCall = await callPreferenceFuture;
-  Map<String, dynamic>? acceptedNativeCall;
+  streamvf.CallData? acceptedNativeCall;
 
   if (storedUser != null) {
     // Construct the authenticated client immediately, but do not block the
@@ -154,18 +148,18 @@ Future<void> main() async {
     acceptedNativeCall: acceptedNativeCall,
   ));
 
-  if (storedUser != null) {
+  if (storedUser != null && acceptedNativeCall == null) {
     // Connection repair must not depend on the notification permission dialog
     // or FCM token lookup succeeding.
     unawaited(AppInitializer.ensurePushRegistration(maxAttempts: 3));
   }
-  unawaited(_setupFirebaseMessaging());
+  if (acceptedNativeCall == null) unawaited(_setupFirebaseMessaging());
 }
 
 class QROnlyApp extends StatelessWidget {
   final User? storedUser;
   final bool? initialVideoCall;
-  final Map<String, dynamic>? acceptedNativeCall;
+  final streamvf.CallData? acceptedNativeCall;
 
   /// Allows widget tests to verify initial routing without loading Firebase.
   /// Production uses [LoginView].
@@ -236,7 +230,7 @@ class QROnlyApp extends StatelessWidget {
   }
 }
 
-/// First route for an Answer action that launched a terminated Android app.
+/// First route for an Answer action that launched a terminated mobile app.
 /// It intentionally has no Home UI: native Answer has already expressed the
 /// homeowner's intent, so the only visible state while Stream resolves the
 /// call is a branded connecting screen.
@@ -247,7 +241,7 @@ class ColdStartCallScreen extends StatefulWidget {
     super.key,
   });
 
-  final Map<String, dynamic> nativeCall;
+  final streamvf.CallData nativeCall;
   final bool videoCall;
 
   @override
@@ -269,9 +263,8 @@ class _ColdStartCallScreenState extends State<ColdStartCallScreen> {
   Future<void> _openAcceptedCall() async {
     if (_started) return;
     _started = true;
-    final uuid = widget.nativeCall['id'] as String?;
-    final extra = widget.nativeCall['extra'];
-    final callCid = extra is Map ? extra['callCid'] as String? : null;
+    final uuid = widget.nativeCall.uuid;
+    final callCid = widget.nativeCall.callCid;
     if (uuid == null || callCid == null) {
       await _fallbackToHome('The accepted call data is unavailable.');
       return;
@@ -279,8 +272,6 @@ class _ColdStartCallScreenState extends State<ColdStartCallScreen> {
 
     try {
       final call = await IncomingAnswer.accept(uuid, callCid);
-      // Remove the native ringing card before presenting the in-call route.
-      await FlutterCallkitIncoming.endCall(uuid);
       if (!mounted) return;
       await Navigator.of(context).push(
         MaterialPageRoute(
@@ -292,8 +283,10 @@ class _ColdStartCallScreenState extends State<ColdStartCallScreen> {
       // connecting screen again.
       if (mounted) {
         Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const HomeView()),
+          MaterialPageRoute(
+              builder: (_) => HomeView(initialVideoCall: widget.videoCall)),
         );
+        unawaited(_setupFirebaseMessaging());
       }
     } catch (error, stackTrace) {
       debugPrint('Direct cold-start call routing failed: $error');
@@ -305,15 +298,11 @@ class _ColdStartCallScreenState extends State<ColdStartCallScreen> {
 
   Future<void> _fallbackToHome(String message) async {
     debugPrint(message);
-    final uuid = widget.nativeCall['id'] as String?;
-    if (uuid != null) {
+    final callCid = widget.nativeCall.callCid;
+    if (callCid != null && streamvf.StreamVideo.isInitialized()) {
       try {
-        await IncomingAnswer.acknowledge(uuid);
-      } catch (error) {
-        debugPrint('Answer cleanup failed: $error');
-      }
-      try {
-        await FlutterCallkitIncoming.endCall(uuid);
+        await streamvf.StreamVideo.instance.pushNotificationManager
+            ?.endCallByCid(callCid, silent: true);
       } catch (error) {
         debugPrint('Native call cleanup failed: $error');
       }
@@ -323,6 +312,7 @@ class _ColdStartCallScreenState extends State<ColdStartCallScreen> {
       MaterialPageRoute(
           builder: (_) => HomeView(initialVideoCall: widget.videoCall)),
     );
+    unawaited(_setupFirebaseMessaging());
   }
 
   @override

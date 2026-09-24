@@ -71,14 +71,11 @@ void main() {
         AppInitializer.hasReusableStreamToken('not-a-jwt', now: now), isFalse);
   });
 
-  test('native call CID extraction supports CallKit payload shape', () {
+  test('native call UUID is deterministic for a valid call CID', () {
     expect(
-      callCidFromNativeCall({
-        'id': 'uuid',
-        'extra': {'callCid': 'default:call-123'},
-      }),
-      'default:call-123',
+      nativeUuidForCallCid('default:0123456789abcdef0123456789abcdef'),
+      '01234567-89ab-cdef-0123-456789abcdef',
     );
-    expect(callCidFromNativeCall({'id': 'uuid'}), isNull);
+    expect(nativeUuidForCallCid('default:call-123'), isNull);
   });
 }

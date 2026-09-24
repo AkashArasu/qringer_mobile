@@ -7,7 +7,6 @@
 -keep class io.flutter.app.** { *; }
 
 # Keep third-party Flutter plugin classes
--keep class com.hiennv.flutter_callkit_incoming.** { *; }
 
 # Suppress warnings for common missing classes
 -dontwarn org.conscrypt.**

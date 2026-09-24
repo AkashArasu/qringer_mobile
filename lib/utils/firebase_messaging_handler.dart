@@ -1,40 +1,16 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
-import 'package:flutter_callkit_incoming/entities/entities.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:qringer_mobile_stream_io/firebase_options.dart';
 import 'package:qringer_mobile_stream_io/utils/app_init.dart';
 import 'package:stream_video_flutter/stream_video_flutter.dart' as streamvf;
 
-/// Stores the homeowner's preferred media mode. StreamVideo itself is owned by
-/// [AppInitializer]; keeping a second client here previously caused stale-token
-/// and duplicate-notification problems.
+/// The saved media preference is loaded before the first UI frame and is never
+/// inferred from a notification, which may have been created on another device.
 class BackgroundStreamVideoManager {
-  static streamvf.StreamVideo? _instance;
   static const FlutterSecureStorage _storage = FlutterSecureStorage();
   static const String _callPreferenceKey = 'user_call_preference';
-
-  static Future<streamvf.StreamVideo?> getInstance() async {
-    final storedUser = await AppInitializer.getStoredUser();
-    if (storedUser == null) return null;
-
-    if (streamvf.StreamVideo.isInitialized()) {
-      _instance = streamvf.StreamVideo.instance;
-      return _instance;
-    }
-
-    try {
-      _instance = await AppInitializer.init(storedUser);
-      return _instance;
-    } catch (error, stackTrace) {
-      debugPrint('Unable to initialize StreamVideo: $error');
-      debugPrintStack(stackTrace: stackTrace);
-      _instance = null;
-      return null;
-    }
-  }
 
   static Future<bool> getCallPreference() async {
     try {
@@ -48,169 +24,111 @@ class BackgroundStreamVideoManager {
 
   static Future<void> setCallPreference(bool videoCall) async {
     try {
-      await _storage.write(
-        key: _callPreferenceKey,
-        value: videoCall.toString(),
-      );
+      await _storage.write(key: _callPreferenceKey, value: videoCall.toString());
     } catch (error) {
       debugPrint('Error storing call preference: $error');
     }
   }
+}
 
-  static Future<void> cleanup() async {
-    final client = _instance;
-    _instance = null;
-    if (client == null) return;
-    try {
-      await client.disconnect();
-    } catch (error) {
-      debugPrint('Error cleaning up StreamVideo instance: $error');
+/// Stream's Worker generates 32-hex call IDs. A stable native UUID makes a
+/// redelivered FCM message idempotent even across Android background isolates.
+String? nativeUuidForCallCid(String? cid) {
+  if (cid == null || !RegExp(r'^default:[a-f0-9]{32}$').hasMatch(cid)) {
+    return null;
+  }
+  final id = cid.substring('default:'.length);
+  return '${id.substring(0, 8)}-${id.substring(8, 12)}-'
+      '${id.substring(12, 16)}-${id.substring(16, 20)}-${id.substring(20)}';
+}
+
+Future<streamvf.CallData?> acceptedNativeCall() async {
+  if (!streamvf.StreamVideo.isInitialized()) return null;
+  final calls = await streamvf.StreamVideo.instance.pushNotificationManager
+      ?.activeCalls();
+  for (final call in calls ?? <streamvf.CallData>[]) {
+    if (call.isAccepted && call.uuid != null && call.callCid != null) {
+      return call;
     }
   }
+  return null;
 }
 
-String? callCidFromNativeCall(dynamic rawCall) {
-  if (rawCall is! Map) return null;
-  final call = Map<String, dynamic>.from(rawCall);
-  final extra = call['extra'];
-  if (extra is! Map) return null;
-  return Map<String, dynamic>.from(extra)['callCid'] as String?;
+Future<bool> hasNativeCallForCid(String? cid, streamvf.StreamVideo client) async {
+  if (cid == null) return false;
+  final calls = await client.pushNotificationManager?.activeCalls();
+  return calls?.any((call) => call.callCid == cid) ?? false;
 }
 
-Future<bool> hasNativeCallForCid(String? callCid) async {
-  if (callCid == null || callCid.isEmpty) return false;
-  try {
-    final calls = await FlutterCallkitIncoming.activeCalls();
-    return calls.any((call) => callCidFromNativeCall(call) == callCid);
-  } catch (error) {
-    debugPrint('Unable to inspect native incoming calls: $error');
-    return false;
-  }
-}
-
-Future<bool> waitForNativeCall(String? callCid) async {
-  for (var attempt = 0; attempt < 12; attempt++) {
-    if (await hasNativeCallForCid(callCid)) return true;
-    await Future<void>.delayed(const Duration(milliseconds: 75));
-  }
-  return false;
-}
-
-/// Firebase invokes this entry point in a background isolate. That isolate has
-/// no foreground StreamVideo singleton. It restores an authenticated client
-/// without opening the coordinator WebSocket; the SDK only needs its HTTP call
-/// lookup to validate the ring and present the native incoming-call UI.
+/// Called by Firebase in a separate Android isolate. Present the native ring
+/// before any Firebase-token refresh, Stream connection, or call lookup. Those
+/// network tasks only verify and clean up a stale ring after it is visible.
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   try {
-    // A background isolate has no Firebase or Stream singleton yet. Always
-    // initialize it before inspecting/handling the payload so Android can
-    // present Stream's native ringing UI while the app is backgrounded.
+    final payload = message.data;
+    if (payload['sender'] != 'stream.video') return;
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
     );
-
-    final payload = message.data;
-    if (payload['sender'] != 'stream.video') {
-      debugPrint('Ignoring non-Stream background message ${message.messageId}');
-      return;
-    }
-
-    final callCid = payload['call_cid'] as String?;
-    debugPrint(
-        'Handling Stream background ringing message ${message.messageId}: $callCid');
-
-    // FCM may redeliver the same high-priority data message. The pinned Stream
-    // SDK generates a new native UUID for each delivery, so deduplicate by CID
-    // before asking it to show another incoming-call card.
-    if (await hasNativeCallForCid(callCid)) {
-      debugPrint('Ignoring duplicate incoming-call delivery for $callCid');
-      return;
-    }
-
     final storedUser = await AppInitializer.getStoredUser();
-    if (storedUser == null) {
-      debugPrint('Cannot ring in background: no signed-in homeowner');
+    if (storedUser == null) return;
+
+    final client = AppInitializer.createBackgroundClient(storedUser);
+    if (payload['type'] != 'call.ring') {
+      await client.handleRingingFlowNotifications(payload);
       return;
     }
 
-    if (defaultTargetPlatform == TargetPlatform.android &&
-        payload['type'] == 'call.ring') {
-      final sentAt = message.sentTime;
-      final age =
-          sentAt == null ? 0 : DateTime.now().difference(sentAt).inMilliseconds;
-      final remaining = 30000 - age;
-      if (remaining <= 0 || callCid == null || !callCid.startsWith('default:'))
-        return;
-      final id = callCid.substring('default:'.length);
-      if (!RegExp(r'^[a-f0-9]{32}$').hasMatch(id)) return;
-      final uuid =
-          '${id.substring(0, 8)}-${id.substring(8, 12)}-${id.substring(12, 16)}-${id.substring(16, 20)}-${id.substring(20)}';
-      // Ring from the delivered FCM payload. Firebase/Stream token refresh
-      // and call lookup happen only when answering, not before presentation.
-      await FlutterCallkitIncoming.showCallkitIncoming(CallKitParams(
-        id: uuid,
-        nameCaller: 'Visitor',
-        appName: 'QROnly',
+    final cid = payload['call_cid'] as String?;
+    final uuid = nativeUuidForCallCid(cid);
+    if (cid == null || uuid == null) return;
+    final sentAt = message.sentTime;
+    final ageMs = sentAt == null
+        ? 0
+        : DateTime.now().difference(sentAt).inMilliseconds;
+    if (ageMs >= 30000) return;
+
+    if (!await hasNativeCallForCid(cid, client)) {
+      final videoCall = await BackgroundStreamVideoManager.getCallPreference();
+      await client.pushNotificationManager?.showIncomingCall(
+        uuid: uuid,
+        callCid: cid,
+        callerName: 'Visitor',
         handle: 'Visitor at your door',
-        type: 0,
-        duration: remaining.clamp(1, 30000),
-        textAccept: 'Accept',
-        textDecline: 'Decline',
-        extra: {'callCid': callCid},
-        missedCallNotification: const NotificationParams(
-            showNotification: true,
-            isShowCallback: false,
-            subtitle: 'Missed visitor'),
-        android: const AndroidParams(
-            isCustomNotification: true,
-            ringtonePath: 'system_ringtone_default',
-            incomingCallNotificationChannelName: 'Incoming Call'),
-      ));
-      debugPrint(
-          'QROnly ring presented cid=$callCid pushAgeMs=$age at=${DateTime.now().toUtc().toIso8601String()}');
-      // Validate after presenting, so a cancelled call can be removed without
-      // making every legitimate ring wait for authentication/network access.
-      try {
-        final client = streamvf.StreamVideo.isInitialized()
-            ? streamvf.StreamVideo.instance
-            : await AppInitializer.init(storedUser, connect: false);
-        final state = await client
-            .getCallRingingState(
-              callType: streamvf.StreamCallType.defaultType(),
-              id: id,
-            )
-            .timeout(const Duration(seconds: 8));
-        if (state == streamvf.CallRingingState.rejected ||
-            state == streamvf.CallRingingState.accepted) {
-          final calls = await FlutterCallkitIncoming.activeCalls();
-          final locallyAccepted = calls.any((raw) =>
-              raw is Map &&
-              callCidFromNativeCall(raw) == callCid &&
-              raw['isAccepted'] == true);
-          if (!locallyAccepted) await FlutterCallkitIncoming.endCall(uuid);
-        }
-        // SDK maps lookup failures to `ended`; do not silence a valid ring
-        // just because the verification request failed. Native expiry bounds it.
-      } catch (error) {
-        debugPrint('Post-presentation validation deferred: $error');
-      }
-      return;
+        hasVideo: videoCall,
+      );
+      debugPrint('QROnly ring presented cid=$cid pushAgeMs=$ageMs '
+          'at=${DateTime.now().toUtc().toIso8601String()}');
     }
 
-    final client = streamvf.StreamVideo.isInitialized()
-        ? streamvf.StreamVideo.instance
-        : await AppInitializer.init(storedUser, connect: false);
-
-    final handled = await client.handleRingingFlowNotifications(payload);
-    final presented = handled && await waitForNativeCall(callCid);
-    debugPrint(
-      presented
-          ? 'Background incoming-call notification presented'
-          : handled
-              ? 'Stream handled the ring but native presentation was not confirmed'
-              : 'Stream did not handle background message ${message.messageId}',
-    );
+    // A late or cancelled push must not ring indefinitely. The Stream event
+    // listener also dismisses calls ended while this verification is running.
+    try {
+      final connection = await client
+          .connect(registerPushDevice: false)
+          .timeout(const Duration(seconds: 8));
+      if (connection.isFailure) return;
+      final state = await client
+          .getCallRingingState(
+            callType: streamvf.StreamCallType.defaultType(),
+            id: cid.substring('default:'.length),
+          )
+          .timeout(const Duration(seconds: 8));
+      if (state != streamvf.CallRingingState.ringing) {
+        final active = await client.pushNotificationManager?.activeCalls();
+        final answeredHere = active?.any(
+              (call) => call.callCid == cid && call.isAccepted,
+            ) ??
+            false;
+        if (!answeredHere) {
+          await client.pushNotificationManager
+              ?.endCallByCid(cid, silent: true);
+        }
+      }
+    } catch (error) {
+      debugPrint('Post-presentation ring verification deferred: $error');
+    }
   } catch (error, stackTrace) {
     debugPrint('Background incoming-call handling failed: $error');
     debugPrintStack(stackTrace: stackTrace);

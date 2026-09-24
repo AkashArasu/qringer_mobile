@@ -1,23 +1,9 @@
-import 'dart:io';
-import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:stream_video_flutter/stream_video_flutter.dart';
 import 'signaling_client.dart';
 
 class IncomingAnswer {
-  static const _channel = MethodChannel('qronly/pending_answer');
   static final Map<String, Future<Call>> _pending = {};
-
-  static Future<Map<String, dynamic>?> readNative() async {
-    if (!Platform.isAndroid) return null;
-    final result = await _channel.invokeMapMethod<String, dynamic>('read');
-    return result;
-  }
-
-  static Future<void> acknowledge(String uuid) async {
-    if (Platform.isAndroid) await _channel.invokeMethod<void>('ack', uuid);
-  }
 
   static Future<Call> accept(String uuid, String cid) {
     return _pending.putIfAbsent(
@@ -41,8 +27,9 @@ class IncomingAnswer {
           'QROnly Worker accepted cid=$cid elapsedMs=${timer.elapsedMilliseconds}');
       accepted = true;
       final client = StreamVideo.instance;
-      final connection =
-          await client.connect().timeout(const Duration(seconds: 12));
+      final connection = await client
+          .connect(registerPushDevice: false)
+          .timeout(const Duration(seconds: 12));
       if (connection.isFailure) throw StateError('Unable to connect the call');
       final restored = await client
           .consumeIncomingCall(uuid: uuid, cid: cid)
@@ -51,20 +38,13 @@ class IncomingAnswer {
       if (call == null) throw StateError('This call is no longer available');
       final result = await call.accept().timeout(const Duration(seconds: 8));
       if (result.isFailure) throw StateError('Unable to answer the call');
-      await acknowledge(uuid);
       debugPrint(
           'QROnly call ready cid=$cid elapsedMs=${timer.elapsedMilliseconds}');
       return call;
     } catch (_) {
-      // Both persisted launch intent and plugin active-call record must be
-      // cleared, otherwise Home's resume recovery retries the expired Answer.
       try {
-        await acknowledge(uuid);
-      } catch (error) {
-        debugPrint('Answer cleanup failed: $error');
-      }
-      try {
-        await FlutterCallkitIncoming.endCall(uuid);
+        await StreamVideo.instance.pushNotificationManager
+            ?.endCallByCid(cid, silent: true);
       } catch (error) {
         debugPrint('Native call cleanup failed: $error');
       }

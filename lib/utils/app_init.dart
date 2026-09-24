@@ -8,7 +8,6 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:stream_video_flutter/stream_video_flutter.dart' as stream;
 import 'package:stream_video_push_notification/stream_video_push_notification.dart';
 import 'package:flutter/foundation.dart';
-import 'package:firebase_messaging/firebase_messaging.dart';
 
 class AppInitializer {
   static const storedUserPhoneNumberKey = 'loggedInUserPhoneNumber';
@@ -16,7 +15,6 @@ class AppInitializer {
   static const storedUserTokenKey = 'loggedInUserToken';
   static const storedPropertyIdKey = 'propertyPublicId';
   static Future<bool>? _pushRegistrationInFlight;
-  static StreamSubscription<String>? _fcmTokenRefreshSubscription;
 
   static Future<User?> getStoredUser() async {
     const storage = FlutterSecureStorage();
@@ -45,8 +43,6 @@ class AppInitializer {
 
   static Future<void> clearStoredUser() async {
     const storage = FlutterSecureStorage();
-    await _fcmTokenRefreshSubscription?.cancel();
-    _fcmTokenRefreshSubscription = null;
     _pushRegistrationInFlight = null;
     await storage.delete(key: storedUserPhoneNumberKey);
     await storage.delete(key: storedUserNameKey);
@@ -98,33 +94,15 @@ class AppInitializer {
       onTokenUpdated: (token) => storeUser(
         User(user: user.user, token: token.rawValue),
       ),
-      options: const stream.StreamVideoOptions(
+      options: stream.StreamVideoOptions(
+        autoConnect: false,
         keepConnectionsAliveWhenInBackground: true,
         // Stream's default logger is silent. Keep production quiet, but emit
         // coordinator WebSocket close codes while diagnosing debug builds.
         logPriority: kDebugMode ? stream.Priority.debug : stream.Priority.none,
       ),
-      pushNotificationManagerProvider:
-          StreamVideoPushNotificationManager.create(
-        iosPushProvider: const StreamVideoPushProvider.apn(
-          name: AppKeys.iosPushProviderName,
-        ),
-        androidPushProvider: const StreamVideoPushProvider.firebase(
-          name: AppKeys.androidPushProviderName,
-        ),
-        pushParams: const StreamVideoPushParams(
-          appName: 'QROnly',
-          ios: IOSParams(iconName: 'IconMask'),
-          missedCallNotification: NotificationParams(
-            showNotification: true,
-            isShowCallback: false,
-            subtitle: 'Missed visitor',
-          ),
-        ),
-        registerApnDeviceToken: true,
-      ),
+      pushNotificationManagerProvider: createPushManagerProvider(),
     );
-    _observeFcmTokenRefresh(client);
 
     if (connect) {
       final registered = await ensurePushRegistration(
@@ -140,8 +118,49 @@ class AppInitializer {
     return client;
   }
 
-  /// Repairs both the Stream coordinator connection and push-device mapping.
-  /// Safe to call repeatedly: Stream connect and create-device are idempotent.
+  static stream.PNManagerProvider createPushManagerProvider() =>
+      StreamVideoPushNotificationManager.create(
+        iosPushProvider: const StreamVideoPushProvider.apn(
+          name: AppKeys.iosPushProviderName,
+        ),
+        androidPushProvider: const StreamVideoPushProvider.firebase(
+          name: AppKeys.androidPushProviderName,
+        ),
+        pushConfiguration: const StreamVideoPushConfiguration(
+          ios: IOSPushConfiguration(iconName: 'IconMask'),
+          android: AndroidPushConfiguration(
+            incomingCallNotificationChannelName: 'Incoming Call',
+            incomingCallNotification: IncomingCallNotificationParams(
+              textAccept: 'Accept',
+              textDecline: 'Decline',
+            ),
+            missedCallNotification: MissedCallNotificationParams(
+              showNotification: true,
+              showCallbackButton: false,
+              subtitle: 'Missed visitor',
+            ),
+          ),
+        ),
+        registerApnDeviceToken: true,
+      );
+
+  /// The Android FCM isolate has no foreground singleton. Use the same token
+  /// loader and push configuration without creating a second app-wide client.
+  static stream.StreamVideo createBackgroundClient(User user) {
+    final token = user.token;
+    return stream.StreamVideo.create(
+      AppKeys.streamApiKey,
+      user: user.user,
+      userToken: token != null && hasReusableStreamToken(token) ? token : null,
+      tokenLoader: (_) =>
+          _loadFreshStreamToken(user.user.id, user.user.name ?? 'Homeowner'),
+      options: stream.StreamVideoOptions(autoConnect: false),
+      pushNotificationManagerProvider: createPushManagerProvider(),
+    );
+  }
+
+  /// Reconnects Stream. Its push manager owns initial and refreshed device
+  /// registration; calling addDevice here as well created duplicate mappings.
   static Future<bool> ensurePushRegistration({
     stream.StreamVideo? client,
     int maxAttempts = 3,
@@ -172,8 +191,7 @@ class AppInitializer {
       try {
         final connection = await client.connect();
         if (connection.isSuccess) {
-          final registered = await _registerAndroidPushDevice(client);
-          if (registered) return true;
+          return true;
         } else {
           debugPrint(
             '❌ Stream connection attempt $attempt/$maxAttempts failed: $connection',
@@ -191,59 +209,6 @@ class AppInitializer {
       }
     }
     return false;
-  }
-
-  /// Registers the current FCM token explicitly. The push-notification
-  /// manager also registers it, but its registration failures are silent in
-  /// the current Stream SDK; doing this here makes first-login delivery
-  /// reliable and visible in the Flutter log.
-  static Future<bool> _registerAndroidPushDevice(
-    stream.StreamVideo client, {
-    String? pushToken,
-  }) async {
-    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return true;
-    try {
-      final token = pushToken ?? await FirebaseMessaging.instance.getToken();
-      if (token == null || token.isEmpty) {
-        debugPrint(
-            '❌ FCM did not return a device token; incoming calls cannot be delivered');
-        return false;
-      }
-      final result = await client.addDevice(
-        pushToken: token,
-        pushProvider: stream.PushProvider.firebase,
-        pushProviderName: AppKeys.androidPushProviderName,
-      );
-      if (result.isFailure) {
-        debugPrint('❌ Stream rejected FCM device registration: $result');
-        return false;
-      } else {
-        debugPrint('✅ FCM device registered with Stream');
-        return true;
-      }
-    } catch (error) {
-      debugPrint('❌ Unable to register the FCM device with Stream: $error');
-      return false;
-    }
-  }
-
-  static void _observeFcmTokenRefresh(stream.StreamVideo client) {
-    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
-    _fcmTokenRefreshSubscription ??=
-        FirebaseMessaging.instance.onTokenRefresh.listen(
-      (token) async {
-        debugPrint('FCM token changed; refreshing Stream device mapping');
-        final connected = await client.connect();
-        if (connected.isFailure) {
-          debugPrint('Unable to reconnect Stream after FCM token refresh');
-          return;
-        }
-        await _registerAndroidPushDevice(client, pushToken: token);
-      },
-      onError: (Object error) {
-        debugPrint('FCM token refresh listener failed: $error');
-      },
-    );
   }
 
   /// Reject cached JWTs that are expired or close enough to expiry that a

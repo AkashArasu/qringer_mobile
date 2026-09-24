@@ -4,8 +4,6 @@ import 'dart:math' as math;
 
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_callkit_incoming/entities/entities.dart';
-import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:qringer_mobile_stream_io/callscreen_view.dart';
 import 'package:qringer_mobile_stream_io/my_qrcode_view.dart';
 import 'package:qringer_mobile_stream_io/utils/app_init.dart';
@@ -68,13 +66,15 @@ class _HomeViewState extends State<HomeView> with WidgetsBindingObserver {
   final streamvf.Subscriptions subscriptions = streamvf.Subscriptions();
   bool videoCall = true;
   bool _isLoading = false;
-  bool _isHandlingCallKitAction = false;
+  bool _isHandlingNativeAnswer = false;
   bool _hasOpenedIncomingCall = false;
   String? _openedIncomingCallCid;
   bool _callPreferenceLoaded = false;
-  dynamic _pendingCallKitAccept;
+  streamvf.CallData? _pendingNativeAccept;
   static const int _fcmSubscription = 1;
-  static const int _callKitSubscription = 2;
+  static const int _nativeAcceptSubscription = 2;
+  static const int _nativeDeclineSubscription = 3;
+  static const int _nativeEndSubscription = 4;
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
   @override
@@ -84,7 +84,7 @@ class _HomeViewState extends State<HomeView> with WidgetsBindingObserver {
     videoCall = widget.initialVideoCall ?? true;
     // Attach before any await. Android may deliver the Answer action as soon
     // as Flutter attaches to a process launched from a notification.
-    _observeCallKitEvents();
+    _observeNativeRingingActions();
     _initializeApp();
   }
 
@@ -108,11 +108,11 @@ class _HomeViewState extends State<HomeView> with WidgetsBindingObserver {
       _callPreferenceLoaded = true;
       if (mounted) setState(() {});
 
-      final pendingAccept = _pendingCallKitAccept;
-      _pendingCallKitAccept = null;
+      final pendingAccept = _pendingNativeAccept;
+      _pendingNativeAccept = null;
       if (pendingAccept != null) {
-        debugPrint('Processing CallKit Answer action queued during startup');
-        unawaited(_acceptCallKitCall(pendingAccept));
+        debugPrint('Processing native Answer queued during startup');
+        unawaited(_acceptNativeCall(pendingAccept));
       }
 
       _observeFcmMessages();
@@ -132,84 +132,70 @@ class _HomeViewState extends State<HomeView> with WidgetsBindingObserver {
 
   Future<bool> _handleRemoteMessage(RemoteMessage message) async {
     try {
-      debugPrint('🔥 Handling FOREGROUND FCM message: ${message.messageId}');
-      debugPrint('🔥 Message data: ${message.data}');
-      debugPrint('🔥 Message from: ${message.from ?? "unknown"}');
-
       if (message.data['sender'] != 'stream.video') return false;
+      final client = streamvf.StreamVideo.instance;
+      if (message.data['type'] != 'call.ring') {
+        return client.handleRingingFlowNotifications(message.data);
+      }
       final callCid = message.data['call_cid'] as String?;
-      if (await hasNativeCallForCid(callCid)) {
-        debugPrint('Ignoring duplicate foreground ring for $callCid');
-        return true;
+      final uuid = nativeUuidForCallCid(callCid);
+      if (uuid == null || callCid == null) return false;
+      final sentAt = message.sentTime;
+      if (sentAt != null &&
+          DateTime.now().difference(sentAt) >= const Duration(seconds: 30)) {
+        debugPrint('Ignoring expired foreground ring cid=$callCid');
+        return false;
       }
-
-      final startTime = DateTime.now();
-      final result = await streamvf.StreamVideo.instance
-          .handleRingingFlowNotifications(message.data)
-          .timeout(const Duration(seconds: 8)); // Reduced from 15s to 8s
-
-      final presented = result && await waitForNativeCall(callCid);
-
-      final duration = DateTime.now().difference(startTime);
-      debugPrint(
-          '✅ Foreground FCM message handled: $result, nativePresented=$presented in ${duration.inSeconds}s');
-
-      if (!result) {
-        debugPrint('⚠️ Foreground message handling failed');
-        if (mounted) {
-          _showErrorSnackBar('Call notification handling failed');
-        }
-      }
-
-      return result;
+      if (await hasNativeCallForCid(callCid, client)) return true;
+      await client.pushNotificationManager?.showIncomingCall(
+        uuid: uuid,
+        callCid: callCid,
+        callerName: 'Visitor',
+        handle: 'Visitor at your door',
+        hasVideo: videoCall,
+      );
+      debugPrint('QROnly foreground ring presented cid=$callCid');
+      return true;
     } catch (e, stackTrace) {
-      debugPrint('❌ Error handling foreground message: $e');
-      debugPrint('Stack trace: $stackTrace');
-      if (mounted) {
-        _showErrorSnackBar('Failed to handle incoming call notification');
-      }
+      debugPrint('Foreground ring failed: $e');
+      debugPrintStack(stackTrace: stackTrace);
       return false;
     }
   }
 
-  void _observeCallKitEvents() {
-    // Do not use Stream's observeCoreCallKitEvents helper here. In this SDK
-    // version it accepts *and joins* with SDK defaults before our CallScreen
-    // can apply the homeowner's audio/video preference. Handle the action
-    // ourselves: accept the ringing call, then let CallScreen perform the
-    // one and only join with the selected media options.
-    subscriptions.add(
-      _callKitSubscription,
-      FlutterCallkitIncoming.onEvent.listen((event) {
-        if (event == null) return;
-        debugPrint(
-            'CallKit event received: ${event.event}, body: ${event.body}');
-        switch (event.event) {
-          case Event.actionCallAccept:
-            if (!_callPreferenceLoaded) {
-              debugPrint(
-                  'Queueing CallKit Answer action until startup completes');
-              _pendingCallKitAccept = event.body;
-              return;
-            }
-            unawaited(_acceptCallKitCall(event.body));
-          case Event.actionCallDecline:
-            unawaited(_rejectCallKitCall(event.body));
-          default:
-            break;
-        }
-      }),
-    );
+  void _observeNativeRingingActions() {
+    // Stream's observeCoreRingingEvents joins RTC before its callback. Listen
+    // to native actions directly so the Worker can accept first and CallScreen
+    // can apply the saved audio/video mode to the one and only media join.
+    final client = streamvf.StreamVideo.instance;
+    final accept = client.onRingingEvent<streamvf.ActionCallAccept>((event) {
+      if (!_callPreferenceLoaded) {
+        _pendingNativeAccept = event.data;
+      } else {
+        unawaited(_acceptNativeCall(event.data));
+      }
+    });
+    if (accept != null) subscriptions.add(_nativeAcceptSubscription, accept);
+
+    final decline = client.onRingingEvent<streamvf.ActionCallDecline>((event) {
+      final cid = event.data.callCid;
+      if (cid != null) unawaited(_rejectNativeCall(cid));
+    });
+    if (decline != null) subscriptions.add(_nativeDeclineSubscription, decline);
+
+    final ended = client.onRingingEvent<streamvf.ActionCallEnded>((event) {
+      final cid = event.data.callCid;
+      if (cid != null && event.data.endedBySystem) {
+        unawaited(SignalingClient.end(_callIdFromCid(cid)));
+      }
+    });
+    if (ended != null) subscriptions.add(_nativeEndSubscription, ended);
   }
 
-  /// When Android launches a terminated app from the native Answer action,
-  /// its broadcast event can be sent before Flutter attaches an EventChannel
-  /// listener. The CallKit plugin persists the accepted native call in Shared
-  /// Preferences, but does so just after sending that broadcast. Poll the
-  /// *accepted* marker briefly so we neither lose that race nor accidentally
-  /// answer a call merely because the homeowner opened the app manually.
+  /// Native Answer can arrive before the Flutter listener exists.
+  /// Recover only an explicitly accepted call, never a merely ringing one.
   void _recoverAcceptedCallAfterTerminatedLaunch() {
-    if (!Platform.isAndroid) return;
+    if (!Platform.isAndroid && !Platform.isIOS) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_recoverAcceptedNativeCall());
     });
@@ -217,32 +203,17 @@ class _HomeViewState extends State<HomeView> with WidgetsBindingObserver {
 
   Future<void> _recoverAcceptedNativeCall() async {
     if (!_callPreferenceLoaded || !mounted) return;
-    // Android's receiver writes the accepted flag immediately after emitting
-    // its EventChannel event. Four short attempts cover a cold Flutter engine
-    // without making normal launches wait or auto-answer ringing calls.
     for (var attempt = 1; attempt <= 4; attempt++) {
-      if (_isHandlingCallKitAction || _hasOpenedIncomingCall) return;
+      if (_isHandlingNativeAnswer || _hasOpenedIncomingCall) return;
       try {
-        final pending = await IncomingAnswer.readNative();
-        if (pending != null) {
-          await _acceptCallKitCall(pending);
-          return;
-        }
-        final activeCalls = await FlutterCallkitIncoming.activeCalls();
-        final acceptedCall =
-            activeCalls.cast<dynamic>().whereType<Map>().cast<Map>().firstWhere(
-                  (call) => call['isAccepted'] == true,
-                  orElse: () => const <String, dynamic>{},
-                );
-        if (acceptedCall.isNotEmpty) {
-          debugPrint(
-              'Recovering accepted native call after terminated launch (attempt $attempt)');
-          await _acceptCallKitCall(acceptedCall);
+        final call = await acceptedNativeCall();
+        if (call != null) {
+          debugPrint('Recovering accepted native call (attempt $attempt)');
+          await _acceptNativeCall(call);
           return;
         }
       } catch (error, stackTrace) {
-        debugPrint(
-            'Terminated native-call recovery attempt $attempt failed: $error');
+        debugPrint('Native Answer recovery attempt $attempt failed: $error');
         debugPrintStack(stackTrace: stackTrace);
       }
 
@@ -250,55 +221,39 @@ class _HomeViewState extends State<HomeView> with WidgetsBindingObserver {
         await Future<void>.delayed(const Duration(milliseconds: 250));
       }
     }
-    debugPrint(
-        'No accepted native call found during terminated-launch recovery');
   }
 
-  Future<void> _acceptCallKitCall(dynamic rawBody) async {
-    if (_isHandlingCallKitAction) return;
-    final callData = _callKitData(rawBody);
-    final uuid = callData.$1;
-    final callCid = callData.$2;
+  Future<void> _acceptNativeCall(streamvf.CallData data) async {
+    if (_isHandlingNativeAnswer) return;
+    final uuid = data.uuid;
+    final callCid = data.callCid;
     if (uuid == null || callCid == null) {
-      debugPrint(
-          'CallKit accept ignored: missing native call identifiers. body=$rawBody');
+      debugPrint('Native Answer ignored: missing call identifiers');
       return;
     }
 
-    _isHandlingCallKitAction = true;
+    _isHandlingNativeAnswer = true;
     try {
-      debugPrint('Consuming accepted native call: cid=$callCid');
       if (_hasOpenedIncomingCall) return;
       final callToJoin = await IncomingAnswer.accept(uuid, callCid);
-      debugPrint(
-          'Native call accepted; routing directly to CallScreen: ${callToJoin.callCid}');
-      await _acceptAndOpenCall(callToJoin, source: 'CallKit');
-      await FlutterCallkitIncoming.endCall(uuid);
+      debugPrint('Native Answer ready; opening CallScreen: ${callToJoin.callCid}');
+      await _acceptAndOpenCall(callToJoin, source: 'native Answer');
     } catch (error, stackTrace) {
-      debugPrint('CallKit accept failed: $error');
+      debugPrint('Native Answer failed: $error');
       debugPrintStack(stackTrace: stackTrace);
       if (mounted && error is! CallUnavailableException) {
         _showErrorSnackBar('Unable to answer the incoming call');
       }
     } finally {
-      _isHandlingCallKitAction = false;
+      _isHandlingNativeAnswer = false;
     }
   }
 
-  Future<void> _rejectCallKitCall(dynamic rawBody) async {
-    final callData = _callKitData(rawBody);
-    final uuid = callData.$1;
-    final callCid = callData.$2;
-    if (uuid == null || callCid == null) return;
+  Future<void> _rejectNativeCall(String callCid) async {
     try {
-      final result = await streamvf.StreamVideo.instance
-          .consumeIncomingCall(uuid: uuid, cid: callCid);
-      final call = result.getDataOrNull();
-      if (call != null) await call.reject();
       await SignalingClient.reject(_callIdFromCid(callCid));
-      await FlutterCallkitIncoming.endCall(uuid);
     } catch (error) {
-      debugPrint('CallKit reject failed: $error');
+      debugPrint('Native decline signaling failed: $error');
     }
   }
 
@@ -325,18 +280,6 @@ class _HomeViewState extends State<HomeView> with WidgetsBindingObserver {
       _openedIncomingCallCid = null;
       rethrow;
     }
-  }
-
-  (String?, String?) _callKitData(dynamic rawBody) {
-    if (rawBody is! Map) return (null, null);
-    final body = Map<String, dynamic>.from(rawBody);
-    final extra = body['extra'];
-    final extraData = extra is Map
-        ? Map<String, dynamic>.from(extra)
-        : const <String, dynamic>{};
-    final uuid = body['id'] as String?;
-    final callCid = extraData['callCid'] as String?;
-    return (uuid, callCid);
   }
 
   String _callIdFromCid(String cid) =>
@@ -441,9 +384,6 @@ class _HomeViewState extends State<HomeView> with WidgetsBindingObserver {
 
       // Cancel all subscriptions first
       subscriptions.cancelAll();
-
-      // Cleanup background StreamVideo manager
-      await BackgroundStreamVideoManager.cleanup();
 
       // Disconnect and reset main StreamVideo instance
       await streamvf.StreamVideo.instance.disconnect();
