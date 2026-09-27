@@ -134,6 +134,10 @@ class _HomeViewState extends State<HomeView> with WidgetsBindingObserver {
     try {
       if (message.data['sender'] != 'stream.video') return false;
       final client = streamvf.StreamVideo.instance;
+      if (message.data['type'] == 'call.missed') {
+        final cid = message.data['call_cid'] as String?;
+        return cid != null && await showMissedCallIfUnanswered(cid);
+      }
       if (message.data['type'] != 'call.ring') {
         return client.handleRingingFlowNotifications(message.data);
       }
@@ -236,7 +240,8 @@ class _HomeViewState extends State<HomeView> with WidgetsBindingObserver {
     try {
       if (_hasOpenedIncomingCall) return;
       final callToJoin = await IncomingAnswer.accept(uuid, callCid);
-      debugPrint('Native Answer ready; opening CallScreen: ${callToJoin.callCid}');
+      debugPrint(
+          'Native Answer ready; opening CallScreen: ${callToJoin.callCid}');
       await _acceptAndOpenCall(callToJoin, source: 'native Answer');
     } catch (error, stackTrace) {
       debugPrint('Native Answer failed: $error');

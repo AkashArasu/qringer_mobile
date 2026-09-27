@@ -76,9 +76,8 @@ class AppInitializer {
       return existing;
     }
 
-    // A still-valid cached token lets a background isolate inspect a ringing
-    // call without first waiting on Firebase + Worker round trips. The token
-    // loader remains installed so the SDK can refresh it when necessary.
+    // A still-valid cached token avoids a Firebase + Worker round trip on
+    // normal app startup. The token loader refreshes it when necessary.
     final storedToken = user.token;
     final cachedToken =
         storedToken != null && hasReusableStreamToken(storedToken)
@@ -119,6 +118,24 @@ class AppInitializer {
     return client;
   }
 
+  static const StreamVideoPushConfiguration pushConfiguration =
+      StreamVideoPushConfiguration(
+    ios: IOSPushConfiguration(iconName: 'IconMask'),
+    android: AndroidPushConfiguration(
+      ringtonePath: 'system_ringtone_default',
+      incomingCallNotificationChannelName: 'Incoming Call',
+      incomingCallNotification: IncomingCallNotificationParams(
+        textAccept: 'Accept',
+        textDecline: 'Decline',
+      ),
+      missedCallNotification: MissedCallNotificationParams(
+        showNotification: true,
+        showCallbackButton: false,
+        subtitle: 'Missed visitor',
+      ),
+    ),
+  );
+
   static stream.PNManagerProvider createPushManagerProvider() =>
       StreamVideoPushNotificationManager.create(
         iosPushProvider: const StreamVideoPushProvider.apn(
@@ -127,38 +144,9 @@ class AppInitializer {
         androidPushProvider: const StreamVideoPushProvider.firebase(
           name: AppKeys.androidPushProviderName,
         ),
-        pushConfiguration: const StreamVideoPushConfiguration(
-          ios: IOSPushConfiguration(iconName: 'IconMask'),
-          android: AndroidPushConfiguration(
-            incomingCallNotificationChannelName: 'Incoming Call',
-            incomingCallNotification: IncomingCallNotificationParams(
-              textAccept: 'Accept',
-              textDecline: 'Decline',
-            ),
-            missedCallNotification: MissedCallNotificationParams(
-              showNotification: true,
-              showCallbackButton: false,
-              subtitle: 'Missed visitor',
-            ),
-          ),
-        ),
+        pushConfiguration: pushConfiguration,
         registerApnDeviceToken: true,
       );
-
-  /// The Android FCM isolate has no foreground singleton. Use the same token
-  /// loader and push configuration without creating a second app-wide client.
-  static stream.StreamVideo createBackgroundClient(User user) {
-    final token = user.token;
-    return stream.StreamVideo.create(
-      AppKeys.streamApiKey,
-      user: user.user,
-      userToken: token != null && hasReusableStreamToken(token) ? token : null,
-      tokenLoader: (_) =>
-          _loadFreshStreamToken(user.user.id, user.user.name ?? 'Homeowner'),
-      options: stream.StreamVideoOptions(autoConnect: false),
-      pushNotificationManagerProvider: createPushManagerProvider(),
-    );
-  }
 
   /// Connects Stream, then verifies that its push manager actually registered
   /// the current device token. A successful WebSocket connection alone does
@@ -194,7 +182,8 @@ class AppInitializer {
         final connection = await client.connect();
         if (connection.isSuccess) {
           if (await _verifyAndRepairPushDevice(client)) return true;
-          debugPrint('⚠️ Stream connected, but the push device is not registered');
+          debugPrint(
+              '⚠️ Stream connected, but the push device is not registered');
         } else {
           debugPrint(
             '❌ Stream connection attempt $attempt/$maxAttempts failed: $connection',
@@ -218,12 +207,12 @@ class AppInitializer {
     stream.StreamVideo client,
   ) async {
     if (!Platform.isAndroid && !Platform.isIOS) return true;
-    final token = await client.pushNotificationManager?.getDevicePushTokenVoIP();
+    final token =
+        await client.pushNotificationManager?.getDevicePushTokenVoIP();
     if (token == null || token.isEmpty) return false;
 
-    final provider = Platform.isIOS
-        ? stream.PushProvider.apn
-        : stream.PushProvider.firebase;
+    final provider =
+        Platform.isIOS ? stream.PushProvider.apn : stream.PushProvider.firebase;
     final providerName = Platform.isIOS
         ? AppKeys.iosPushProviderName
         : AppKeys.androidPushProviderName;

@@ -63,6 +63,12 @@ dev_dependencies:
   # rules and activating additional ones.
   flutter_lints: ^3.0.0
 
+dependency_overrides:
+  # Local fix: keep the native incoming-call ringtone playing when the screen
+  # turns off. The upstream 1.6.0 player stops on ACTION_SCREEN_OFF.
+  stream_video_push_notification:
+    path: packages/stream_video_push_notification
+
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
 

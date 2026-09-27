@@ -15,6 +15,27 @@ class SignalingClient {
   static Future<void> reject(String callId) => _transition(callId, 'reject');
   static Future<void> end(String callId) => _transition(callId, 'end');
 
+  /// The Worker is authoritative for whether an incoming ring was unanswered.
+  /// Stream may send a missed-call push after a visitor has cancelled, so the
+  /// push alone must never decide whether to show a missed-call notification.
+  static Future<String?> callStatus(String callId) async {
+    final propertyId = await AppInitializer.getPropertyId();
+    final firebaseUser = FirebaseAuth.instance.currentUser;
+    if (propertyId == null || firebaseUser == null) return null;
+    final idToken = await firebaseUser.getIdToken();
+    if (idToken == null || idToken.isEmpty) return null;
+    final response = await http.get(
+      Uri.parse('${AppKeys.signalingBaseUrl}/v1/homeowner/calls/$callId'),
+      headers: {
+        'Authorization': 'Bearer $idToken',
+        'X-Property-Id': propertyId,
+      },
+    ).timeout(const Duration(seconds: 5));
+    if (response.statusCode != 200) return null;
+    return (jsonDecode(response.body) as Map<String, dynamic>)['status']
+        as String?;
+  }
+
   static Future<void> _transition(String callId, String action) async {
     final propertyId = await AppInitializer.getPropertyId();
     final firebaseUser = FirebaseAuth.instance.currentUser;

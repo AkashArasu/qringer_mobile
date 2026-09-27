@@ -973,10 +973,9 @@ packages:
   stream_video_push_notification:
     dependency: "direct main"
     description:
-      name: stream_video_push_notification
-      sha256: "5ab38763bcc3394446c88dc771fa8588b8516966253c5890390f8c9efed01357"
-      url: "https://pub.dev"
-    source: hosted
+      path: "packages/stream_video_push_notification"
+      relative: true
+    source: path
     version: "1.6.0"
   stream_webrtc_flutter:
     dependency: transitive
