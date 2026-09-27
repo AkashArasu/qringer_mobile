@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import 'package:http/http.dart' as http;
 import 'package:qringer_mobile_stream_io/utils/app_keys.dart';
@@ -159,8 +160,9 @@ class AppInitializer {
     );
   }
 
-  /// Reconnects Stream. Its push manager owns initial and refreshed device
-  /// registration; calling addDevice here as well created duplicate mappings.
+  /// Connects Stream, then verifies that its push manager actually registered
+  /// the current device token. A successful WebSocket connection alone does
+  /// not mean a terminated app can receive a call.
   static Future<bool> ensurePushRegistration({
     stream.StreamVideo? client,
     int maxAttempts = 3,
@@ -191,7 +193,8 @@ class AppInitializer {
       try {
         final connection = await client.connect();
         if (connection.isSuccess) {
-          return true;
+          if (await _verifyAndRepairPushDevice(client)) return true;
+          debugPrint('⚠️ Stream connected, but the push device is not registered');
         } else {
           debugPrint(
             '❌ Stream connection attempt $attempt/$maxAttempts failed: $connection',
@@ -209,6 +212,48 @@ class AppInitializer {
       }
     }
     return false;
+  }
+
+  static Future<bool> _verifyAndRepairPushDevice(
+    stream.StreamVideo client,
+  ) async {
+    if (!Platform.isAndroid && !Platform.isIOS) return true;
+    final token = await client.pushNotificationManager?.getDevicePushTokenVoIP();
+    if (token == null || token.isEmpty) return false;
+
+    final provider = Platform.isIOS
+        ? stream.PushProvider.apn
+        : stream.PushProvider.firebase;
+    final providerName = Platform.isIOS
+        ? AppKeys.iosPushProviderName
+        : AppKeys.androidPushProviderName;
+
+    Future<bool> isRegistered() async {
+      final result = await client.getDevices();
+      final devices = result.getDataOrNull();
+      return devices?.any((device) =>
+              device.pushToken == token &&
+              device.pushProvider == provider &&
+              device.pushProviderName == providerName &&
+              device.disabled != true &&
+              (!Platform.isIOS || device.voip == true)) ??
+          false;
+    }
+
+    if (await isRegistered()) return true;
+    // The SDK's automatic registration can still be in flight immediately
+    // after connect. Give it one short chance before repairing a missing or
+    // disabled device entry explicitly.
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+    if (await isRegistered()) return true;
+    final repaired = await client.addDevice(
+      pushToken: token,
+      pushProvider: provider,
+      pushProviderName: providerName,
+      voipToken: Platform.isIOS,
+    );
+    if (repaired.isFailure) return false;
+    return isRegistered();
   }
 
   /// Reject cached JWTs that are expired or close enough to expiry that a
